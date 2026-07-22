@@ -1,16 +1,11 @@
-// Fill this in once you've created a free Firebase project (see README.md).
-// Firebase Console → Project settings → General → "Your apps" → SDK setup and config.
-// These values are not secret — it's normal for them to be public in a client-side app;
-// access is controlled by the Firestore security rules, not by hiding this config.
-//
-// Leave firebaseConfig as null to run the app in local-only mode (no cross-device sync).
-export const firebaseConfig = null;
-
-// export const firebaseConfig = {
-//   apiKey: "AIza...",
-//   authDomain: "your-project.firebaseapp.com",
-//   projectId: "your-project",
-//   storageBucket: "your-project.appspot.com",
-//   messagingSenderId: "...",
-//   appId: "...",
-// };
+// Firebase project config. These values are not secret — it's normal for them to be
+// public in a client-side app; access is controlled by the Firestore security rules,
+// not by hiding this config.
+export const firebaseConfig = {
+  apiKey: "AIzaSyCohIMnjACB-SzhEYikZwT5VDzug_oV7iE",
+  authDomain: "todo-app-65862.firebaseapp.com",
+  projectId: "todo-app-65862",
+  storageBucket: "todo-app-65862.firebasestorage.app",
+  messagingSenderId: "684163113597",
+  appId: "1:684163113597:web:256dfcc1c8798467a40714",
+};
