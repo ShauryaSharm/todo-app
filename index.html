@@ -5,13 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>To Do</title>
 
-<!-- PWA manifest -->
 <link rel="manifest" href="manifest.json" />
-<meta name="theme-color" content="#2563eb" />
+<meta name="theme-color" content="#0a0a0a" />
 
-<!-- iOS home screen support (Safari ignores manifest icons/name, needs these explicitly) -->
 <meta name="apple-mobile-web-app-capable" content="yes" />
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black" />
 <meta name="apple-mobile-web-app-title" content="To Do" />
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
 <link rel="icon" href="icons/favicon-32.png" sizes="32x32" />
@@ -22,31 +20,47 @@
 
 <div class="app">
   <header class="topbar">
-    <h1>To Do</h1>
-    <button id="signinBtn" class="signin-btn" hidden>Sign in to sync</button>
-    <div id="userChip" class="user-chip" hidden>
-      <img id="userPhoto" alt="" />
-      <span id="userName"></span>
-      <button id="signoutBtn" title="Sign out">Sign out</button>
+    <h1>To&nbsp;Do</h1>
+    <div class="account">
+      <button id="signinBtn" class="signin-btn" hidden>Sign in</button>
+      <div id="userChip" class="user-chip" hidden>
+        <img id="userPhoto" alt="" />
+        <button id="signoutBtn" title="Sign out">Sign out</button>
+      </div>
     </div>
   </header>
 
-  <p id="syncStatus" class="sync-status"></p>
+  <p id="syncStatus" class="sync-status" aria-live="polite"></p>
 
   <form id="addForm" class="add-form">
-    <input id="taskInput" type="text" placeholder="Add a task…" autocomplete="off" maxlength="200" />
-    <button type="submit">Add</button>
+    <input id="taskInput" type="text" placeholder="Add a task…  try “call mom friday 3pm”"
+           autocomplete="off" maxlength="200" />
+    <button type="submit" id="addBtn" aria-label="Add task">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+    </button>
   </form>
 
-  <div class="filters">
-    <button class="filter-btn active" data-filter="all">All</button>
-    <button class="filter-btn" data-filter="active">Active</button>
-    <button class="filter-btn" data-filter="done">Done</button>
+  <nav class="views" id="views">
+    <button class="view-btn active" data-view="today">Today</button>
+    <button class="view-btn" data-view="upcoming">Upcoming</button>
+    <button class="view-btn" data-view="all">All</button>
+    <button class="view-btn" data-view="done">Done</button>
+  </nav>
+
+  <div id="progress" class="progress" hidden>
+    <div class="progress-track"><div id="progressFill" class="progress-fill"></div></div>
+    <span id="progressLabel" class="progress-label"></span>
+    <button id="planBtn" class="plan-btn" hidden>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 5.8H20l-4.9 3.6 1.9 5.8L12 14.6 7 18.2l1.9-5.8L4 8.8h6.1z"/></svg>
+      Plan my day
+    </button>
   </div>
+
+  <div id="planNote" class="plan-note" hidden></div>
 
   <ul id="taskList" class="task-list"></ul>
 
-  <p id="emptyState" class="empty-state" hidden>Nothing here yet — add your first task above.</p>
+  <p id="emptyState" class="empty-state" hidden></p>
 </div>
 
 <script type="module" src="app.js"></script>

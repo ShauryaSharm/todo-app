@@ -4,3 +4,4 @@
 //
 // Leave as null to skip AI categorization and rely only on the local keyword guess.
 export const AI_ENDPOINT = "https://todo-app-tan-nine-89.vercel.app/api/organize";
+export const PLAN_ENDPOINT = "https://todo-app-tan-nine-89.vercel.app/api/plan";

@@ -1,173 +1,380 @@
 import { firebaseConfig } from "./firebase-config.js";
-import { AI_ENDPOINT } from "./ai-config.js";
+import { AI_ENDPOINT, PLAN_ENDPOINT } from "./ai-config.js";
 
 const STORAGE_KEY = "todo-tasks-v1";
 
 const CATEGORY_COLORS = {
-  Work: "#2563eb",
-  Personal: "#7c3aed",
-  Shopping: "#059669",
-  Health: "#dc2626",
-  Urgent: "#ea580c",
-  Other: "#6b7280",
+  Work: "var(--cat-work)",
+  Personal: "var(--cat-personal)",
+  Shopping: "var(--cat-shopping)",
+  Health: "var(--cat-health)",
+  Urgent: "var(--cat-urgent)",
+  Other: "var(--cat-other)",
 };
 
 const CATEGORY_KEYWORDS = {
-  Urgent: ["urgent", "asap", "important", "overdue", "emergency"],
-  Work: ["meeting", "email", "report", "project", "client", "presentation", "deadline", "boss", "invoice", "work"],
-  Shopping: ["buy", "purchase", "store", "grocery", "groceries", "milk", "shop", "order"],
-  Health: ["doctor", "dentist", "gym", "workout", "medicine", "appointment", "therapy", "exercise"],
-  Personal: ["mom", "dad", "family", "friend", "birthday", "clean", "laundry", "call"],
+  Urgent: ["urgent", "asap", "important", "overdue", "emergency", "now"],
+  Work: ["meeting", "email", "report", "project", "client", "presentation", "deadline", "boss", "invoice", "work", "slides"],
+  Shopping: ["buy", "purchase", "store", "grocery", "groceries", "milk", "shop", "order", "pick up"],
+  Health: ["doctor", "dentist", "gym", "workout", "medicine", "prescription", "pharmacy", "appointment", "therapy", "exercise", "run"],
+  Personal: ["mom", "dad", "family", "friend", "birthday", "clean", "laundry", "call", "text"],
 };
 
-function guessCategory(text) {
-  const lower = text.toLowerCase();
-  for (const [category, keywords] of Object.entries(CATEGORY_KEYWORDS)) {
-    if (keywords.some((kw) => lower.includes(kw))) return category;
-  }
-  return "Other";
-}
+const PRIORITY_RANK = { high: 0, medium: 1, low: 2 };
 
-async function aiCategorize(text) {
-  if (!AI_ENDPOINT) return null;
-  try {
-    const res = await fetch(AI_ENDPOINT, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text }),
-    });
-    if (!res.ok) return null;
-    const data = await res.json();
-    return data.category && CATEGORY_COLORS[data.category] ? data.category : null;
-  } catch {
-    return null;
-  }
-}
-
+// ---------- DOM ----------
 const taskInput = document.getElementById("taskInput");
 const addForm = document.getElementById("addForm");
 const taskList = document.getElementById("taskList");
 const emptyState = document.getElementById("emptyState");
-const filterBtns = document.querySelectorAll(".filter-btn");
+const viewBtns = document.querySelectorAll(".view-btn");
+const progress = document.getElementById("progress");
+const progressFill = document.getElementById("progressFill");
+const progressLabel = document.getElementById("progressLabel");
+const planBtn = document.getElementById("planBtn");
+const planNote = document.getElementById("planNote");
 const signinBtn = document.getElementById("signinBtn");
 const signoutBtn = document.getElementById("signoutBtn");
 const userChip = document.getElementById("userChip");
 const userPhoto = document.getElementById("userPhoto");
-const userName = document.getElementById("userName");
 const syncStatus = document.getElementById("syncStatus");
 
+// ---------- state ----------
 let tasks = loadLocal();
-let filter = "all";
-let cloud = null; // set once Firebase is wired up and a user signs in
+let view = "today";
+let editingId = null;
+let cloud = null;
+let planOrder = null;              // AI "plan my day" ordering (session only)
+const parsingIds = new Set();      // tasks currently being parsed by AI
 
 function loadLocal() {
-  try {
-    return JSON.parse(localStorage.getItem(STORAGE_KEY)) || [];
-  } catch {
-    return [];
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || []; }
+  catch { return []; }
+}
+function saveLocal() { localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks)); }
+function uid() { return crypto.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random()); }
+
+// ---------- date helpers ----------
+function todayStr() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+function isOverdue(t) { return !t.done && t.dueDate && t.dueDate < todayStr(); }
+function isToday(t) { return t.dueDate === todayStr(); }
+
+function formatDue(dateStr, timeStr) {
+  if (!dateStr) return "";
+  const today = new Date(todayStr() + "T00:00:00");
+  const due = new Date(dateStr + "T00:00:00");
+  const diff = Math.round((due - today) / 86400000);
+  let label;
+  if (diff === 0) label = "Today";
+  else if (diff === 1) label = "Tomorrow";
+  else if (diff === -1) label = "Yesterday";
+  else if (diff < -1) label = `${Math.abs(diff)}d ago`;
+  else if (diff > 1 && diff < 7) label = due.toLocaleDateString(undefined, { weekday: "short" });
+  else label = due.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  if (timeStr) label += " · " + formatTime(timeStr);
+  return label;
+}
+function formatTime(t) {
+  const [h, m] = t.split(":").map(Number);
+  const ampm = h >= 12 ? "pm" : "am";
+  const h12 = h % 12 || 12;
+  return m ? `${h12}:${String(m).padStart(2, "0")}${ampm}` : `${h12}${ampm}`;
+}
+
+// ---------- category guess ----------
+function guessCategory(text) {
+  const lower = text.toLowerCase();
+  for (const [category, kws] of Object.entries(CATEGORY_KEYWORDS)) {
+    if (kws.some((kw) => lower.includes(kw))) return category;
   }
+  return "Other";
 }
 
-function saveLocal() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks));
+// ---------- sorting / filtering ----------
+function comparator(a, b) {
+  const ao = isOverdue(a), bo = isOverdue(b);
+  if (ao !== bo) return ao ? -1 : 1;                    // overdue first
+  const ad = a.dueDate || "9999-99-99", bd = b.dueDate || "9999-99-99";
+  if (ad !== bd) return ad < bd ? -1 : 1;               // sooner due first
+  const ap = PRIORITY_RANK[a.priority] ?? 1, bp = PRIORITY_RANK[b.priority] ?? 1;
+  if (ap !== bp) return ap - bp;                        // higher priority first
+  return b.createdAt - a.createdAt;                     // newest first
 }
 
-function uid() {
-  return crypto.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random());
+function visibleTasks() {
+  const active = tasks.filter((t) => !t.done);
+  if (view === "today") {
+    const today = active.filter((t) => t.dueDate && t.dueDate <= todayStr());
+    if (planOrder) {
+      const rank = new Map(planOrder.map((id, i) => [id, i]));
+      return today.sort((a, b) => (rank.get(a.id) ?? 999) - (rank.get(b.id) ?? 999));
+    }
+    return today.sort(comparator);
+  }
+  if (view === "upcoming")
+    return active.filter((t) => t.dueDate && t.dueDate > todayStr()).sort(comparator);
+  if (view === "done")
+    return tasks.filter((t) => t.done).sort((a, b) => (b.completedAt || 0) - (a.completedAt || 0));
+  return active.sort(comparator); // "all"
 }
 
+const EMPTY_MSG = {
+  today: "Nothing due today.<br><span class=\"muted\">Enjoy the calm, or check <b>All</b>.</span>",
+  upcoming: "No upcoming tasks scheduled.",
+  all: "All clear.<br><span class=\"muted\">Add your first task above.</span>",
+  done: "Nothing completed yet.<br><span class=\"muted\">Check something off to see it here.</span>",
+};
+
+// ---------- render ----------
 function render() {
-  const visible = tasks
-    .filter((t) => (filter === "active" ? !t.done : filter === "done" ? t.done : true))
-    .sort((a, b) => b.createdAt - a.createdAt);
+  viewBtns.forEach((b) => b.classList.toggle("active", b.dataset.view === view));
 
+  const list = visibleTasks();
   taskList.innerHTML = "";
-  emptyState.hidden = visible.length > 0;
-  emptyState.textContent = tasks.length === 0
-    ? "Nothing here yet — add your first task above."
-    : "Nothing to show for this filter.";
 
-  for (const task of visible) {
-    const li = document.createElement("li");
-    li.className = "task-item" + (task.done ? " done" : "");
-
-    const check = document.createElement("button");
-    check.className = "task-check";
-    check.setAttribute("aria-label", "Toggle complete");
-    check.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3"><path d="M4 12l6 6L20 6"/></svg>';
-    check.onclick = () => toggleTask(task.id);
-
-    const dot = document.createElement("span");
-    dot.className = "cat-dot";
-    dot.style.background = CATEGORY_COLORS[task.category] || CATEGORY_COLORS.Other;
-    dot.title = task.category || "Other";
-
-    const text = document.createElement("span");
-    text.className = "task-text";
-    text.textContent = task.text;
-
-    const del = document.createElement("button");
-    del.className = "task-delete";
-    del.setAttribute("aria-label", "Delete task");
-    del.textContent = "✕";
-    del.onclick = () => deleteTask(task.id);
-
-    li.append(check, dot, text, del);
-    taskList.appendChild(li);
+  // progress bar (Today view only)
+  const todayTasks = tasks.filter((t) => t.dueDate && t.dueDate <= todayStr());
+  const todayDone = todayTasks.filter((t) => t.done).length;
+  if (view === "today" && todayTasks.length > 0) {
+    progress.hidden = false;
+    progressFill.style.width = `${Math.round((todayDone / todayTasks.length) * 100)}%`;
+    progressLabel.textContent = `${todayDone}/${todayTasks.length} done`;
+    const activeToday = todayTasks.filter((t) => !t.done).length;
+    planBtn.hidden = !(PLAN_ENDPOINT && activeToday >= 2);
+  } else {
+    progress.hidden = true;
+    planBtn.hidden = true;
   }
+
+  // plan note only in today view
+  planNote.hidden = !(view === "today" && planNote.textContent);
+
+  emptyState.hidden = list.length > 0;
+  if (list.length === 0) { emptyState.innerHTML = EMPTY_MSG[view]; return; }
+
+  for (const task of list) taskList.appendChild(renderTask(task));
 }
 
-function upsertTask(task) {
-  const i = tasks.findIndex((t) => t.id === task.id);
-  if (i === -1) tasks.push(task);
-  else tasks[i] = task;
+function renderTask(task) {
+  const li = document.createElement("li");
+  li.className = "task-item" + (task.done ? " done" : "");
+  if (!task.done && task.priority === "high") li.classList.add("pri-high");
+  if (isOverdue(task)) li.classList.add("overdue");
+  if (parsingIds.has(task.id)) li.classList.add("parsing");
+
+  // checkbox
+  const check = document.createElement("button");
+  check.className = "task-check";
+  check.setAttribute("aria-label", "Toggle complete");
+  check.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l6 6L20 6"/></svg>';
+  check.onclick = () => toggleTask(task.id);
+
+  // body (text + meta)
+  const body = document.createElement("div");
+  body.className = "task-body";
+  const text = document.createElement("div");
+  text.className = "task-text";
+  text.textContent = task.text;
+  body.appendChild(text);
+
+  const meta = document.createElement("div");
+  meta.className = "task-meta";
+  const dot = document.createElement("span");
+  dot.className = "cat-dot";
+  dot.style.background = CATEGORY_COLORS[task.category] || CATEGORY_COLORS.Other;
+  dot.title = task.category || "Other";
+  meta.appendChild(dot);
+  if (task.dueDate) {
+    const chip = document.createElement("span");
+    chip.className = "chip" + (isOverdue(task) ? " due-overdue" : isToday(task) ? " due-today" : "");
+    chip.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>' +
+      `<span>${formatDue(task.dueDate, task.dueTime)}</span>`;
+    meta.appendChild(chip);
+  }
+  body.appendChild(meta);
+  body.onclick = () => { editingId = editingId === task.id ? null : task.id; render(); };
+
+  // delete
+  const del = document.createElement("button");
+  del.className = "task-delete";
+  del.setAttribute("aria-label", "Delete task");
+  del.textContent = "✕";
+  del.onclick = (e) => { e.stopPropagation(); deleteTask(task.id, li); };
+
+  li.append(check, body, del);
+  if (editingId === task.id) li.appendChild(renderEditor(task));
+  return li;
 }
+
+function renderEditor(task) {
+  const wrap = document.createElement("div");
+  wrap.className = "task-editor";
+  wrap.onclick = (e) => e.stopPropagation();
+
+  // due date row
+  const dateRow = document.createElement("div");
+  dateRow.className = "editor-row";
+  dateRow.innerHTML = '<span class="editor-label">Due date</span>';
+  const quick = [
+    ["Today", todayStr()],
+    ["Tomorrow", offsetDate(1)],
+    ["Next week", offsetDate(7)],
+    ["None", null],
+  ];
+  for (const [label, val] of quick) {
+    const b = document.createElement("button");
+    b.className = "mini-btn" + ((task.dueDate || null) === val ? " active" : "");
+    b.textContent = label;
+    b.onclick = () => { updateTask(task.id, { dueDate: val, dueTime: val ? task.dueTime : null }); };
+    dateRow.appendChild(b);
+  }
+  const dateInput = document.createElement("input");
+  dateInput.type = "date";
+  if (task.dueDate) dateInput.value = task.dueDate;
+  dateInput.onchange = () => updateTask(task.id, { dueDate: dateInput.value || null });
+  dateRow.appendChild(dateInput);
+
+  // priority row
+  const priRow = document.createElement("div");
+  priRow.className = "editor-row";
+  priRow.innerHTML = '<span class="editor-label">Priority</span>';
+  for (const p of ["high", "medium", "low"]) {
+    const b = document.createElement("button");
+    b.className = "mini-btn" + (task.priority === p ? " active" : "");
+    b.textContent = p[0].toUpperCase() + p.slice(1);
+    b.onclick = () => updateTask(task.id, { priority: p });
+    priRow.appendChild(b);
+  }
+
+  // category row
+  const catRow = document.createElement("div");
+  catRow.className = "editor-row";
+  catRow.innerHTML = '<span class="editor-label">Category</span>';
+  for (const c of Object.keys(CATEGORY_COLORS)) {
+    const b = document.createElement("button");
+    b.className = "mini-btn" + (task.category === c ? " active" : "");
+    b.textContent = c;
+    b.onclick = () => updateTask(task.id, { category: c });
+    catRow.appendChild(b);
+  }
+
+  wrap.append(dateRow, priRow, catRow);
+  return wrap;
+}
+
+function offsetDate(days) {
+  const d = new Date(todayStr() + "T00:00:00");
+  d.setDate(d.getDate() + days);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+// ---------- mutations ----------
+function persist(task) { saveLocal(); render(); cloud?.push(task); }
 
 function addTask(text) {
   const task = {
-    id: uid(),
-    text,
-    done: false,
-    category: guessCategory(text),
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
+    id: uid(), text, done: false,
+    category: guessCategory(text), priority: "medium",
+    dueDate: null, dueTime: null,
+    createdAt: Date.now(), updatedAt: Date.now(),
   };
-  upsertTask(task);
-  saveLocal();
-  render();
-  cloud?.push(task);
-  refineCategory(task.id, text);
+  tasks.push(task);
+  planOrder = null; planNote.textContent = "";   // a new task makes any AI plan stale
+  persist(task);
+  parseWithAI(task.id, text);
 }
 
-async function refineCategory(id, text) {
-  const category = await aiCategorize(text);
-  if (!category) return;
+function updateTask(id, patch) {
   const task = tasks.find((t) => t.id === id);
-  if (!task || task.category === category) return;
-  task.category = category;
-  task.updatedAt = Date.now();
-  saveLocal();
-  render();
-  cloud?.push(task);
+  if (!task) return;
+  Object.assign(task, patch, { updatedAt: Date.now() });
+  persist(task);
 }
 
 function toggleTask(id) {
   const task = tasks.find((t) => t.id === id);
   if (!task) return;
   task.done = !task.done;
+  task.completedAt = task.done ? Date.now() : null;
   task.updatedAt = Date.now();
-  saveLocal();
-  render();
-  cloud?.push(task);
+  persist(task);
 }
 
-function deleteTask(id) {
+function deleteTask(id, li) {
+  if (li) {
+    li.classList.add("removing");
+    setTimeout(() => finishDelete(id), 260);
+  } else finishDelete(id);
+}
+function finishDelete(id) {
   tasks = tasks.filter((t) => t.id !== id);
-  saveLocal();
-  render();
-  cloud?.remove(id);
+  saveLocal(); render(); cloud?.remove(id);
 }
 
+async function parseWithAI(id, text) {
+  if (!AI_ENDPOINT) return;
+  parsingIds.add(id);
+  render();
+  try {
+    const now = new Date();
+    const res = await fetch(AI_ENDPOINT, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        text, today: todayStr(),
+        weekday: now.toLocaleDateString(undefined, { weekday: "long" }),
+      }),
+    });
+    if (!res.ok) return;
+    const d = await res.json();
+    if (d.error) return;
+    const task = tasks.find((t) => t.id === id);
+    if (!task) return;
+    task.text = d.title || task.text;
+    task.category = d.category || task.category;
+    task.priority = d.priority || task.priority;
+    task.dueDate = d.dueDate || task.dueDate;
+    task.dueTime = d.dueTime || task.dueTime;
+    task.updatedAt = Date.now();
+    parsingIds.delete(id);
+    persist(task);
+  } catch {
+    parsingIds.delete(id);
+    render();
+  }
+}
+
+async function planMyDay() {
+  if (!PLAN_ENDPOINT) return;
+  const todayActive = tasks.filter((t) => !t.done && t.dueDate && t.dueDate <= todayStr());
+  if (todayActive.length < 2) return;
+  planBtn.classList.add("loading");
+  try {
+    const res = await fetch(PLAN_ENDPOINT, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        tasks: todayActive.map((t) => ({
+          id: t.id, title: t.text, category: t.category, priority: t.priority, dueTime: t.dueTime,
+        })),
+      }),
+    });
+    const d = await res.json();
+    if (d.error || !d.order) { setStatus("Couldn't plan right now.", "err"); return; }
+    planOrder = d.order;
+    planNote.textContent = d.note || "";
+    render();
+  } catch {
+    setStatus("Couldn't plan right now.", "err");
+  } finally {
+    planBtn.classList.remove("loading");
+  }
+}
+
+// ---------- events ----------
 addForm.addEventListener("submit", (e) => {
   e.preventDefault();
   const text = taskInput.value.trim();
@@ -176,40 +383,40 @@ addForm.addEventListener("submit", (e) => {
   taskInput.value = "";
 });
 
-filterBtns.forEach((btn) => {
-  btn.addEventListener("click", () => {
-    filterBtns.forEach((b) => b.classList.remove("active"));
-    btn.classList.add("active");
-    filter = btn.dataset.filter;
-    render();
-  });
+viewBtns.forEach((btn) => {
+  btn.addEventListener("click", () => { view = btn.dataset.view; editingId = null; render(); });
 });
+
+planBtn.addEventListener("click", planMyDay);
 
 render();
 
+// ---------- service worker ----------
 if ("serviceWorker" in navigator) {
-  window.addEventListener("load", () => {
-    navigator.serviceWorker.register("sw.js").catch(() => {});
-  });
+  window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
 }
 
+// ---------- cloud sync ----------
 if (firebaseConfig) {
   initCloudSync(firebaseConfig).catch((err) => {
     console.error("Cloud sync unavailable:", err);
-    syncStatus.textContent = "Sync unavailable — working locally.";
+    setStatus("Sync unavailable — working locally.", "err");
   });
 } else {
   signinBtn.hidden = true;
 }
 
+function setStatus(msg, cls) {
+  syncStatus.textContent = msg;
+  syncStatus.className = "sync-status" + (cls ? " " + cls : "");
+}
+
 async function initCloudSync(config) {
   const { initializeApp } = await import("https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js");
-  const {
-    getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged,
-  } = await import("https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js");
-  const {
-    getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot,
-  } = await import("https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js");
+  const { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } =
+    await import("https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js");
+  const { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot } =
+    await import("https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js");
 
   const app = initializeApp(config);
   const auth = getAuth(app);
@@ -218,53 +425,32 @@ async function initCloudSync(config) {
 
   signinBtn.hidden = false;
   signinBtn.onclick = () => signInWithPopup(auth, provider).catch((err) => {
-    console.error(err);
-    syncStatus.textContent = "Sign-in failed. Try again.";
+    console.error(err); setStatus("Sign-in failed. Try again.", "err");
   });
   signoutBtn.onclick = () => signOut(auth);
 
-  let unsubscribeSnapshot = null;
-
+  let unsub = null;
   onAuthStateChanged(auth, async (user) => {
-    if (unsubscribeSnapshot) {
-      unsubscribeSnapshot();
-      unsubscribeSnapshot = null;
-    }
-
+    if (unsub) { unsub(); unsub = null; }
     if (!user) {
-      cloud = null;
-      signinBtn.hidden = false;
-      userChip.hidden = true;
-      syncStatus.textContent = "";
+      cloud = null; signinBtn.hidden = false; userChip.hidden = true; setStatus("");
       return;
     }
-
-    signinBtn.hidden = true;
-    userChip.hidden = false;
+    signinBtn.hidden = true; userChip.hidden = false;
     userPhoto.src = user.photoURL || "";
-    userName.textContent = user.displayName || user.email || "";
-    syncStatus.textContent = "Syncing…";
+    setStatus("Syncing…");
 
     const tasksRef = collection(db, "users", user.uid, "tasks");
-
-    // one-time merge: push any locally-created tasks up so nothing made offline is lost
-    for (const task of tasks) {
-      await setDoc(doc(tasksRef, task.id), task, { merge: true });
-    }
+    for (const task of tasks) await setDoc(doc(tasksRef, task.id), task, { merge: true });
 
     cloud = {
       push: (task) => setDoc(doc(tasksRef, task.id), task, { merge: true }).catch(() => {}),
       remove: (id) => deleteDoc(doc(tasksRef, id)).catch(() => {}),
     };
 
-    unsubscribeSnapshot = onSnapshot(tasksRef, (snap) => {
+    unsub = onSnapshot(tasksRef, (snap) => {
       tasks = snap.docs.map((d) => d.data());
-      saveLocal();
-      render();
-      syncStatus.textContent = "Synced";
-    }, (err) => {
-      console.error(err);
-      syncStatus.textContent = "Sync error — working from local copy.";
-    });
+      saveLocal(); render(); setStatus("Synced", "ok");
+    }, (err) => { console.error(err); setStatus("Sync error — using local copy.", "err"); });
   });
 }

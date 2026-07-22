@@ -1,4 +1,5 @@
 const CATEGORIES = ["Work", "Personal", "Shopping", "Health", "Urgent", "Other"];
+const PRIORITIES = ["high", "medium", "low"];
 const ALLOWED_ORIGIN = "https://shauryasharm.github.io";
 
 export default async function handler(req, res) {
@@ -9,7 +10,7 @@ export default async function handler(req, res) {
   if (req.method === "OPTIONS") return res.status(204).end();
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
-  const { text } = req.body || {};
+  const { text, today, weekday } = req.body || {};
   if (!text || typeof text !== "string") {
     return res.status(400).json({ error: "Missing text" });
   }
@@ -24,11 +25,19 @@ export default async function handler(req, res) {
       body: JSON.stringify({
         model: "llama-3.1-8b-instant",
         temperature: 0,
-        max_tokens: 5,
+        max_tokens: 150,
+        response_format: { type: "json_object" },
         messages: [
           {
             role: "system",
-            content: `Classify the to-do item into exactly one of these categories: ${CATEGORIES.join(", ")}. Reply with only the category word, nothing else.`,
+            content:
+              `You parse a raw to-do input into structured JSON. Today is ${today || "unknown"} (${weekday || ""}). ` +
+              `Return ONLY a JSON object with these keys:\n` +
+              `- "title": the task cleaned of any date/time words (e.g. "call mom friday 3pm" -> "Call mom"). Capitalize the first letter.\n` +
+              `- "category": exactly one of ${CATEGORIES.join(", ")}. Choose the best fit (a doctor/pharmacy/gym task is Health; groceries/buying is Shopping; job/meeting/email is Work).\n` +
+              `- "priority": one of high, medium, low. Infer from words like "urgent/asap/important" (high) vs routine (low); default medium.\n` +
+              `- "dueDate": the resolved date as "YYYY-MM-DD", or null if none mentioned. Resolve relative dates ("today","tomorrow","friday","next week") against today's date.\n` +
+              `- "dueTime": "HH:MM" 24-hour, or null if no time mentioned.`,
           },
           { role: "user", content: text },
         ],
@@ -38,11 +47,20 @@ export default async function handler(req, res) {
     if (!groqRes.ok) throw new Error(`Groq API error: ${groqRes.status}`);
 
     const data = await groqRes.json();
-    const raw = data.choices?.[0]?.message?.content?.trim() || "";
-    const category = CATEGORIES.find((c) => raw.toLowerCase().includes(c.toLowerCase())) || "Other";
+    const parsed = JSON.parse(data.choices?.[0]?.message?.content || "{}");
 
-    return res.status(200).json({ category });
+    const category = CATEGORIES.find(
+      (c) => String(parsed.category || "").toLowerCase() === c.toLowerCase()
+    ) || "Other";
+    const priority = PRIORITIES.includes(String(parsed.priority || "").toLowerCase())
+      ? String(parsed.priority).toLowerCase()
+      : "medium";
+    const dueDate = /^\d{4}-\d{2}-\d{2}$/.test(parsed.dueDate || "") ? parsed.dueDate : null;
+    const dueTime = /^\d{2}:\d{2}$/.test(parsed.dueTime || "") ? parsed.dueTime : null;
+    const title = (typeof parsed.title === "string" && parsed.title.trim()) ? parsed.title.trim() : text;
+
+    return res.status(200).json({ title, category, priority, dueDate, dueTime });
   } catch (err) {
-    return res.status(200).json({ category: "Other", error: "ai_unavailable" });
+    return res.status(200).json({ error: "ai_unavailable" });
   }
 }
