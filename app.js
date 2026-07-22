@@ -33,6 +33,7 @@ const progressFill = document.getElementById("progressFill");
 const progressLabel = document.getElementById("progressLabel");
 const planBtn = document.getElementById("planBtn");
 const planNote = document.getElementById("planNote");
+const clearDone = document.getElementById("clearDone");
 const signinBtn = document.getElementById("signinBtn");
 const signoutBtn = document.getElementById("signoutBtn");
 const userChip = document.getElementById("userChip");
@@ -53,6 +54,10 @@ function loadLocal() {
 }
 function saveLocal() { localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks)); }
 function uid() { return crypto.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random()); }
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
 
 // ---------- date helpers ----------
 function todayStr() {
@@ -128,12 +133,39 @@ const EMPTY_MSG = {
   done: "Nothing completed yet.<br><span class=\"muted\">Check something off to see it here.</span>",
 };
 
+function updateCounts() {
+  const active = tasks.filter((t) => !t.done);
+  const todayActive = active.filter((t) => t.dueDate && t.dueDate <= todayStr());
+  const overdueCount = active.filter(isOverdue).length;
+  const counts = {
+    today: todayActive.length,
+    upcoming: active.filter((t) => t.dueDate && t.dueDate > todayStr()).length,
+    all: active.length,
+    done: tasks.filter((t) => t.done).length,
+  };
+  viewBtns.forEach((btn) => {
+    const badge = btn.querySelector(".count");
+    const n = counts[btn.dataset.view];
+    badge.hidden = !n;
+    badge.textContent = n || "";
+    badge.classList.toggle("has-overdue", btn.dataset.view === "today" && overdueCount > 0);
+  });
+}
+
+function nextUpcoming() {
+  return tasks
+    .filter((t) => !t.done && t.dueDate && t.dueDate > todayStr())
+    .sort(comparator)[0];
+}
+
 // ---------- render ----------
 function render() {
   viewBtns.forEach((b) => b.classList.toggle("active", b.dataset.view === view));
+  updateCounts();
 
   const list = visibleTasks();
   taskList.innerHTML = "";
+  clearDone.hidden = !(view === "done" && list.length > 0);
 
   // progress bar (Today view only)
   const todayTasks = tasks.filter((t) => t.dueDate && t.dueDate <= todayStr());
@@ -153,7 +185,15 @@ function render() {
   planNote.hidden = !(view === "today" && planNote.textContent);
 
   emptyState.hidden = list.length > 0;
-  if (list.length === 0) { emptyState.innerHTML = EMPTY_MSG[view]; return; }
+  if (list.length === 0) {
+    let msg = EMPTY_MSG[view];
+    if (view === "today") {
+      const next = nextUpcoming();
+      if (next) msg = `Nothing due today.<br><span class="muted">Next up: <b>${escapeHtml(next.text)}</b> · ${formatDue(next.dueDate, next.dueTime)}</span>`;
+    }
+    emptyState.innerHTML = msg;
+    return;
+  }
 
   for (const task of list) taskList.appendChild(renderTask(task));
 }
@@ -300,7 +340,17 @@ function toggleTask(id) {
   task.done = !task.done;
   task.completedAt = task.done ? Date.now() : null;
   task.updatedAt = Date.now();
+  if (task.done && navigator.vibrate) navigator.vibrate(12); // subtle haptic on mobile
   persist(task);
+}
+
+function clearCompleted() {
+  const done = tasks.filter((t) => t.done);
+  if (done.length === 0) return;
+  tasks = tasks.filter((t) => !t.done);
+  saveLocal();
+  render();
+  done.forEach((t) => cloud?.remove(t.id));
 }
 
 function deleteTask(id, li) {
@@ -388,6 +438,7 @@ viewBtns.forEach((btn) => {
 });
 
 planBtn.addEventListener("click", planMyDay);
+clearDone.addEventListener("click", clearCompleted);
 
 render();
 

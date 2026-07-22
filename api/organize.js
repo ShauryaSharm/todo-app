@@ -1,6 +1,28 @@
 const CATEGORIES = ["Work", "Personal", "Shopping", "Health", "Urgent", "Other"];
 const PRIORITIES = ["high", "medium", "low"];
 const ALLOWED_ORIGIN = "https://shauryasharm.github.io";
+const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+// Build an exact date-reference table so the model looks dates up instead of doing math.
+function buildDateReference(todayStr) {
+  const base = /^\d{4}-\d{2}-\d{2}$/.test(todayStr || "") ? todayStr : null;
+  if (!base) return "";
+  const [y, m, d] = base.split("-").map(Number);
+  const lines = [];
+  for (let i = 0; i <= 14; i++) {
+    const dt = new Date(Date.UTC(y, m - 1, d + i));
+    const iso = dt.toISOString().slice(0, 10);
+    const name = DAY_NAMES[dt.getUTCDay()];
+    let label;
+    if (i === 0) label = `today (${name})`;
+    else if (i === 1) label = `tomorrow (${name})`;
+    else if (i < 7) label = `this coming ${name}`;
+    else if (i === 7) label = `next ${name} (one week out)`;
+    else label = `${name} (${i} days out)`;
+    lines.push(`${iso} = ${label}`);
+  }
+  return "Date reference (use these exact dates):\n" + lines.join("\n");
+}
 
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", ALLOWED_ORIGIN);
@@ -31,12 +53,13 @@ export default async function handler(req, res) {
           {
             role: "system",
             content:
-              `You parse a raw to-do input into structured JSON. Today is ${today || "unknown"} (${weekday || ""}). ` +
+              `You parse a raw to-do input into structured JSON. Today is ${today || "unknown"} (${weekday || ""}).\n\n` +
+              buildDateReference(today) + `\n\n` +
               `Return ONLY a JSON object with these keys:\n` +
               `- "title": the task cleaned of any date/time words (e.g. "call mom friday 3pm" -> "Call mom"). Capitalize the first letter.\n` +
               `- "category": exactly one of ${CATEGORIES.join(", ")}. Choose the best fit (a doctor/pharmacy/gym task is Health; groceries/buying is Shopping; job/meeting/email is Work).\n` +
               `- "priority": one of high, medium, low. Infer from words like "urgent/asap/important" (high) vs routine (low); default medium.\n` +
-              `- "dueDate": the resolved date as "YYYY-MM-DD", or null if none mentioned. Resolve relative dates ("today","tomorrow","friday","next week") against today's date.\n` +
+              `- "dueDate": the resolved date as "YYYY-MM-DD" using the date reference above, or null if no date mentioned.\n` +
               `- "dueTime": "HH:MM" 24-hour, or null if no time mentioned.`,
           },
           { role: "user", content: text },

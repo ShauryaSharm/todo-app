@@ -159,6 +159,33 @@ body {
   background: var(--accent);
   border-radius: 2px;
 }
+.view-btn .count {
+  margin-left: 0.35rem;
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--text-faint);
+  background: var(--surface);
+  border-radius: 999px;
+  padding: 0.05rem 0.4rem;
+  font-variant-numeric: tabular-nums;
+}
+.view-btn.active .count { color: var(--accent); background: var(--accent-soft); }
+.view-btn .count.has-overdue { color: var(--danger); background: var(--danger-soft); }
+
+.clear-done {
+  display: block;
+  margin: 1.25rem auto 0;
+  font: inherit;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.45rem 1rem;
+  cursor: pointer;
+  transition: all 0.15s var(--ease);
+}
+.clear-done:hover { color: var(--danger); border-color: var(--danger); }
 
 /* ---------- progress ---------- */
 .progress {
