@@ -3,4 +3,4 @@
 // Example: "https://todo-app-yourname.vercel.app/api/organize"
 //
 // Leave as null to skip AI categorization and rely only on the local keyword guess.
-export const AI_ENDPOINT = null;
+export const AI_ENDPOINT = "https://todo-app-tan-nine-89.vercel.app/api/organize";
