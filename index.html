@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>To Do</title>
+
+<!-- PWA manifest -->
+<link rel="manifest" href="manifest.json" />
+<meta name="theme-color" content="#2563eb" />
+
+<!-- iOS home screen support (Safari ignores manifest icons/name, needs these explicitly) -->
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="To Do" />
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+<link rel="icon" href="icons/favicon-32.png" sizes="32x32" />
+
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<div class="app">
+  <header class="topbar">
+    <h1>To Do</h1>
+    <button id="signinBtn" class="signin-btn" hidden>Sign in to sync</button>
+    <div id="userChip" class="user-chip" hidden>
+      <img id="userPhoto" alt="" />
+      <span id="userName"></span>
+      <button id="signoutBtn" title="Sign out">Sign out</button>
+    </div>
+  </header>
+
+  <p id="syncStatus" class="sync-status"></p>
+
+  <form id="addForm" class="add-form">
+    <input id="taskInput" type="text" placeholder="Add a task…" autocomplete="off" maxlength="200" />
+    <button type="submit">Add</button>
+  </form>
+
+  <div class="filters">
+    <button class="filter-btn active" data-filter="all">All</button>
+    <button class="filter-btn" data-filter="active">Active</button>
+    <button class="filter-btn" data-filter="done">Done</button>
+  </div>
+
+  <ul id="taskList" class="task-list"></ul>
+
+  <p id="emptyState" class="empty-state" hidden>Nothing here yet — add your first task above.</p>
+</div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>
