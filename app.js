@@ -254,6 +254,29 @@ function renderEditor(task) {
   wrap.className = "task-editor";
   wrap.onclick = (e) => e.stopPropagation();
 
+  // editable title
+  const titleRow = document.createElement("div");
+  titleRow.className = "editor-row";
+  titleRow.innerHTML = '<span class="editor-label">Task</span>';
+  const titleInput = document.createElement("input");
+  titleInput.type = "text";
+  titleInput.className = "title-input";
+  titleInput.value = task.text;
+  titleInput.maxLength = 200;
+  // Update state live (no full re-render, so the field keeps focus); sync to cloud on blur.
+  titleInput.oninput = () => {
+    const v = titleInput.value;
+    if (!v.trim()) return;
+    task.text = v;
+    task.updatedAt = Date.now();
+    saveLocal();
+    const te = titleInput.closest(".task-item")?.querySelector(".task-text");
+    if (te) te.textContent = v;
+  };
+  titleInput.onblur = () => { titleInput.value = task.text; cloud?.push(task); };
+  titleInput.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); titleInput.blur(); } };
+  titleRow.appendChild(titleInput);
+
   // due date row
   const dateRow = document.createElement("div");
   dateRow.className = "editor-row";
@@ -301,7 +324,7 @@ function renderEditor(task) {
     catRow.appendChild(b);
   }
 
-  wrap.append(dateRow, priRow, catRow);
+  wrap.append(titleRow, dateRow, priRow, catRow);
   return wrap;
 }
 
@@ -360,8 +383,37 @@ function deleteTask(id, li) {
   } else finishDelete(id);
 }
 function finishDelete(id) {
+  const removed = tasks.find((t) => t.id === id);
   tasks = tasks.filter((t) => t.id !== id);
   saveLocal(); render(); cloud?.remove(id);
+  if (removed) showUndoToast(removed);
+}
+
+let toastTimer = null;
+function showUndoToast(task) {
+  hideToast(true);
+  const toast = document.createElement("div");
+  toast.className = "toast";
+  toast.id = "undoToast";
+  toast.innerHTML = `<span>Deleted “${escapeHtml(task.text.slice(0, 30))}${task.text.length > 30 ? "…" : ""}”</span>`;
+  const btn = document.createElement("button");
+  btn.textContent = "Undo";
+  btn.onclick = () => {
+    tasks.push(task);
+    saveLocal(); render(); cloud?.push(task);
+    hideToast();
+  };
+  toast.appendChild(btn);
+  document.body.appendChild(toast);
+  toastTimer = setTimeout(() => hideToast(), 5000);
+}
+function hideToast(instant) {
+  clearTimeout(toastTimer);
+  const el = document.getElementById("undoToast");
+  if (!el) return;
+  if (instant) { el.remove(); return; }
+  el.classList.add("hiding");
+  setTimeout(() => el.remove(), 240);
 }
 
 async function parseWithAI(id, text) {
