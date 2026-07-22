@@ -35,7 +35,10 @@ export default async function handler(req, res) {
       }),
     });
 
-    if (!groqRes.ok) throw new Error(`Groq API error: ${groqRes.status}`);
+    if (!groqRes.ok) {
+      const body = await groqRes.text();
+      throw new Error(`Groq API error: ${groqRes.status} ${body}`);
+    }
 
     const data = await groqRes.json();
     const raw = data.choices?.[0]?.message?.content?.trim() || "";
@@ -43,6 +46,6 @@ export default async function handler(req, res) {
 
     return res.status(200).json({ category });
   } catch (err) {
-    return res.status(200).json({ category: "Other", error: "ai_unavailable" });
+    return res.status(200).json({ category: "Other", error: "ai_unavailable", debug: String(err) });
   }
 }
