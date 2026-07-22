@@ -18,7 +18,7 @@ export default async function handler(req, res) {
     const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
+        Authorization: `Bearer ${(process.env.GROQ_API_KEY || "").trim()}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
@@ -46,6 +46,13 @@ export default async function handler(req, res) {
 
     return res.status(200).json({ category });
   } catch (err) {
-    return res.status(200).json({ category: "Other", error: "ai_unavailable", debug: String(err) });
+    const key = process.env.GROQ_API_KEY || "";
+    return res.status(200).json({
+      category: "Other",
+      error: "ai_unavailable",
+      debug: String(err),
+      keyLength: key.length,
+      keyPreview: key.slice(0, 5),
+    });
   }
 }
