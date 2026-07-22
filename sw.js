@@ -1,4 +1,4 @@
-const CACHE_NAME = "todo-shell-v2";
+const CACHE_NAME = "todo-shell-v3";
 const SHELL_FILES = [
   "./",
   "./index.html",
@@ -32,15 +32,15 @@ self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
   if (event.request.method !== "GET" || url.origin !== self.location.origin) return;
 
+  // Network-first: always try to fetch the latest, fall back to cache when offline.
+  // This keeps the app fresh after deploys instead of serving stale files.
   event.respondWith(
-    caches.match(event.request).then((cached) => {
-      const network = fetch(event.request)
-        .then((response) => {
-          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, response.clone()));
-          return response;
-        })
-        .catch(() => cached);
-      return cached || network;
-    })
+    fetch(event.request)
+      .then((response) => {
+        const copy = response.clone();
+        caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
+        return response;
+      })
+      .catch(() => caches.match(event.request))
   );
 });
