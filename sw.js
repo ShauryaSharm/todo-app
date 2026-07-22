@@ -1,10 +1,11 @@
-const CACHE_NAME = "todo-shell-v1";
+const CACHE_NAME = "todo-shell-v2";
 const SHELL_FILES = [
   "./",
   "./index.html",
   "./style.css",
   "./app.js",
   "./firebase-config.js",
+  "./ai-config.js",
   "./manifest.json",
   "./icons/icon-192.png",
   "./icons/icon-512.png",

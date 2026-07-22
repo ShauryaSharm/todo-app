@@ -190,6 +190,13 @@ body {
   opacity: 1;
 }
 
+.cat-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
 .task-text {
   flex: 1;
   word-break: break-word;

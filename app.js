@@ -1,6 +1,48 @@
 import { firebaseConfig } from "./firebase-config.js";
+import { AI_ENDPOINT } from "./ai-config.js";
 
 const STORAGE_KEY = "todo-tasks-v1";
+
+const CATEGORY_COLORS = {
+  Work: "#2563eb",
+  Personal: "#7c3aed",
+  Shopping: "#059669",
+  Health: "#dc2626",
+  Urgent: "#ea580c",
+  Other: "#6b7280",
+};
+
+const CATEGORY_KEYWORDS = {
+  Urgent: ["urgent", "asap", "important", "overdue", "emergency"],
+  Work: ["meeting", "email", "report", "project", "client", "presentation", "deadline", "boss", "invoice", "work"],
+  Shopping: ["buy", "purchase", "store", "grocery", "groceries", "milk", "shop", "order"],
+  Health: ["doctor", "dentist", "gym", "workout", "medicine", "appointment", "therapy", "exercise"],
+  Personal: ["mom", "dad", "family", "friend", "birthday", "clean", "laundry", "call"],
+};
+
+function guessCategory(text) {
+  const lower = text.toLowerCase();
+  for (const [category, keywords] of Object.entries(CATEGORY_KEYWORDS)) {
+    if (keywords.some((kw) => lower.includes(kw))) return category;
+  }
+  return "Other";
+}
+
+async function aiCategorize(text) {
+  if (!AI_ENDPOINT) return null;
+  try {
+    const res = await fetch(AI_ENDPOINT, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.category && CATEGORY_COLORS[data.category] ? data.category : null;
+  } catch {
+    return null;
+  }
+}
 
 const taskInput = document.getElementById("taskInput");
 const addForm = document.getElementById("addForm");
@@ -55,6 +97,11 @@ function render() {
     check.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3"><path d="M4 12l6 6L20 6"/></svg>';
     check.onclick = () => toggleTask(task.id);
 
+    const dot = document.createElement("span");
+    dot.className = "cat-dot";
+    dot.style.background = CATEGORY_COLORS[task.category] || CATEGORY_COLORS.Other;
+    dot.title = task.category || "Other";
+
     const text = document.createElement("span");
     text.className = "task-text";
     text.textContent = task.text;
@@ -65,7 +112,7 @@ function render() {
     del.textContent = "✕";
     del.onclick = () => deleteTask(task.id);
 
-    li.append(check, text, del);
+    li.append(check, dot, text, del);
     taskList.appendChild(li);
   }
 }
@@ -77,8 +124,28 @@ function upsertTask(task) {
 }
 
 function addTask(text) {
-  const task = { id: uid(), text, done: false, createdAt: Date.now(), updatedAt: Date.now() };
+  const task = {
+    id: uid(),
+    text,
+    done: false,
+    category: guessCategory(text),
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  };
   upsertTask(task);
+  saveLocal();
+  render();
+  cloud?.push(task);
+  refineCategory(task.id, text);
+}
+
+async function refineCategory(id, text) {
+  const category = await aiCategorize(text);
+  if (!category) return;
+  const task = tasks.find((t) => t.id === id);
+  if (!task || task.category === category) return;
+  task.category = category;
+  task.updatedAt = Date.now();
   saveLocal();
   render();
   cloud?.push(task);
