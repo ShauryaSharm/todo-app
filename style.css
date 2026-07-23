@@ -534,14 +534,28 @@ body {
 .cal-day.is-today .cal-daynum { color: var(--accent); }
 .cal-day.is-today .cal-weekday { color: var(--accent); }
 
-/* colored left accent bar per category (matches the agenda reference) */
+/* colorful, Google-Calendar-style event cards tinted by category */
+.task-list .task-item.cal {
+  background: color-mix(in srgb, var(--cal-color) 22%, var(--surface));
+  border-color: color-mix(in srgb, var(--cal-color) 45%, var(--border));
+}
+.task-list .task-item.cal:hover {
+  background: color-mix(in srgb, var(--cal-color) 30%, var(--surface));
+}
 .task-list .task-item.cal::before {
   content: "";
   position: absolute;
   left: 0; top: 0; bottom: 0;
-  width: 4px;
+  width: 5px;
   border-radius: var(--radius) 0 0 var(--radius);
   background: var(--cal-color);
+}
+/* category-tinted checkbox + time on calendar cards */
+.task-list .task-item.cal .task-check { border-color: var(--cal-color); }
+.task-list .task-item.cal.done .task-check { background: var(--cal-color); border-color: var(--cal-color); }
+.task-list .task-item.cal .cat-dot { display: none; }
+.task-list .task-item.cal .chip:not(.due-overdue) {
+  color: color-mix(in srgb, var(--cal-color) 70%, var(--text));
 }
 
 /* ---------- empty state ---------- */
