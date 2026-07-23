@@ -316,9 +316,15 @@ body {
 }
 .task-item.pri-high::before { width: 6px; }   /* thicker bar = higher priority */
 
-/* past-due tasks go red, overriding the category color */
+/* past-due tasks go fully red, overriding the category color */
+.task-item.overdue {
+  background: color-mix(in srgb, var(--danger) 16%, var(--surface));
+  border-color: color-mix(in srgb, var(--danger) 55%, var(--border));
+}
+.task-item.overdue:hover { background: color-mix(in srgb, var(--danger) 22%, var(--surface)); }
 .task-item.overdue::before { background: var(--danger); }
-.task-item.overdue { border-color: color-mix(in srgb, var(--danger) 38%, var(--border)); }
+.task-item.overdue .task-check { border-color: var(--danger); }
+.task-item.overdue .task-text { color: var(--danger); }
 
 .task-check {
   width: 22px;
