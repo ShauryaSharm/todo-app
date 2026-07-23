@@ -254,6 +254,16 @@ function renderEditor(task) {
   wrap.className = "task-editor";
   wrap.onclick = (e) => e.stopPropagation();
 
+  // header with an explicit close button
+  const head = document.createElement("div");
+  head.className = "editor-head";
+  head.innerHTML = '<span class="editor-label">Edit task</span>';
+  const doneBtn = document.createElement("button");
+  doneBtn.className = "editor-done";
+  doneBtn.textContent = "Done";
+  doneBtn.onclick = () => { editingId = null; render(); };
+  head.appendChild(doneBtn);
+
   // editable title
   const titleRow = document.createElement("div");
   titleRow.className = "editor-row";
@@ -324,7 +334,7 @@ function renderEditor(task) {
     catRow.appendChild(b);
   }
 
-  wrap.append(titleRow, dateRow, priRow, catRow);
+  wrap.append(head, titleRow, dateRow, priRow, catRow);
   return wrap;
 }
 

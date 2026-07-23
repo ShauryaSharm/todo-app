@@ -404,6 +404,27 @@ body {
   gap: 0.6rem;
   animation: slideIn 0.22s var(--ease) both;
 }
+.editor-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.1rem;
+}
+.editor-done {
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #1a1206;
+  background: var(--accent);
+  border: none;
+  border-radius: 999px;
+  padding: 0.35rem 0.95rem;
+  cursor: pointer;
+  transition: filter 0.15s var(--ease), transform 0.12s var(--ease);
+}
+.editor-done:hover { filter: brightness(1.08); }
+.editor-done:active { transform: scale(0.94); }
+
 .editor-row { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
 .editor-label { font-size: 0.72rem; color: var(--text-faint); width: 100%; }
 
