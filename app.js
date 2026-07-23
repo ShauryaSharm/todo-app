@@ -140,6 +140,7 @@ function updateCounts() {
   const counts = {
     today: todayActive.length,
     upcoming: active.filter((t) => t.dueDate && t.dueDate > todayStr()).length,
+    calendar: active.filter((t) => t.dueDate).length,
     all: active.length,
     done: tasks.filter((t) => t.done).length,
   };
@@ -162,6 +163,15 @@ function nextUpcoming() {
 function render() {
   viewBtns.forEach((b) => b.classList.toggle("active", b.dataset.view === view));
   updateCounts();
+
+  if (view === "calendar") {
+    progress.hidden = true;
+    planBtn.hidden = true;
+    planNote.hidden = true;
+    clearDone.hidden = true;
+    renderCalendar();
+    return;
+  }
 
   const list = visibleTasks();
   taskList.innerHTML = "";
@@ -196,6 +206,59 @@ function render() {
   }
 
   for (const task of list) taskList.appendChild(renderTask(task));
+}
+
+function renderCalendar() {
+  const items = tasks
+    .filter((t) => !t.done && t.dueDate)
+    .sort((a, b) => {
+      if (a.dueDate !== b.dueDate) return a.dueDate < b.dueDate ? -1 : 1;
+      return (a.dueTime || "99:99") < (b.dueTime || "99:99") ? -1 : 1;
+    });
+
+  taskList.innerHTML = "";
+  emptyState.hidden = items.length > 0;
+  if (items.length === 0) {
+    emptyState.innerHTML = "Nothing scheduled.<br><span class=\"muted\">Add a task with a date to see it here.</span>";
+    return;
+  }
+
+  const thisYear = new Date().getFullYear();
+  let lastMonth = null, lastDate = null;
+
+  for (const task of items) {
+    const d = new Date(task.dueDate + "T00:00:00");
+    const monthKey = `${d.getFullYear()}-${d.getMonth()}`;
+
+    if (monthKey !== lastMonth) {
+      const mh = document.createElement("li");
+      mh.className = "cal-month";
+      mh.textContent = d.toLocaleDateString(undefined, {
+        month: "long",
+        ...(d.getFullYear() !== thisYear ? { year: "numeric" } : {}),
+      }).toUpperCase();
+      taskList.appendChild(mh);
+      lastMonth = monthKey;
+      lastDate = null;
+    }
+
+    if (task.dueDate !== lastDate) {
+      const dh = document.createElement("li");
+      dh.className = "cal-day";
+      if (task.dueDate < todayStr()) dh.classList.add("overdue");
+      else if (task.dueDate === todayStr()) dh.classList.add("is-today");
+      dh.innerHTML =
+        `<span class="cal-daynum">${String(d.getDate()).padStart(2, "0")}</span>` +
+        `<span class="cal-weekday">${d.toLocaleDateString(undefined, { weekday: "long" })}</span>`;
+      taskList.appendChild(dh);
+      lastDate = task.dueDate;
+    }
+
+    const li = renderTask(task);
+    li.classList.add("cal");
+    li.style.setProperty("--cal-color", CATEGORY_COLORS[task.category] || CATEGORY_COLORS.Other);
+    taskList.appendChild(li);
+  }
 }
 
 function renderTask(task) {
@@ -496,7 +559,12 @@ addForm.addEventListener("submit", (e) => {
 });
 
 viewBtns.forEach((btn) => {
-  btn.addEventListener("click", () => { view = btn.dataset.view; editingId = null; render(); });
+  btn.addEventListener("click", () => {
+    view = btn.dataset.view;
+    editingId = null;
+    render();
+    btn.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
+  });
 });
 
 planBtn.addEventListener("click", planMyDay);
