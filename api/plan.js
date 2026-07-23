@@ -13,9 +13,17 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: "No tasks" });
   }
 
+  const to12h = (t) => {
+    if (!/^\d{2}:\d{2}$/.test(t || "")) return t;
+    let [h, m] = t.split(":").map(Number);
+    const ampm = h >= 12 ? "PM" : "AM";
+    h = h % 12 || 12;
+    return m ? `${h}:${String(m).padStart(2, "0")} ${ampm}` : `${h} ${ampm}`;
+  };
+
   const list = tasks
     .slice(0, 25)
-    .map((t) => `${t.id} | ${t.title} | ${t.category} | ${t.priority} priority${t.dueTime ? " | at " + t.dueTime : ""}`)
+    .map((t) => `${t.id} | ${t.title} | ${t.category} | ${t.priority} priority${t.dueTime ? " | at " + to12h(t.dueTime) : ""}`)
     .join("\n");
 
   try {
@@ -37,7 +45,7 @@ export default async function handler(req, res) {
               `You are a calm, sharp productivity coach. Given the user's tasks for today (format: "id | title | category | priority | optional time"), ` +
               `return ONLY JSON with:\n` +
               `- "order": an array of the task ids in the smartest order to tackle them. Respect fixed times, front-load high-priority and quick wins sensibly, and group similar contexts.\n` +
-              `- "note": one short, specific, encouraging sentence (max 18 words) about how to approach the day. Reference the actual tasks, not generic fluff. No emojis.`,
+              `- "note": one short, specific, encouraging sentence (max 18 words) about how to approach the day. Reference the actual tasks, not generic fluff. No emojis. Write any times in 12-hour format with am/pm (e.g. "1:00 PM"), never 24-hour/military time.`,
           },
           { role: "user", content: list },
         ],

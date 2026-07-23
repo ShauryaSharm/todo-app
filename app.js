@@ -256,7 +256,6 @@ function renderCalendar() {
 
     const li = renderTask(task);
     li.classList.add("cal");
-    li.style.setProperty("--cal-color", CATEGORY_COLORS[task.category] || CATEGORY_COLORS.Other);
     taskList.appendChild(li);
   }
 }
@@ -264,6 +263,7 @@ function renderCalendar() {
 function renderTask(task) {
   const li = document.createElement("li");
   li.className = "task-item" + (task.done ? " done" : "");
+  li.style.setProperty("--cat-color", CATEGORY_COLORS[task.category] || CATEGORY_COLORS.Other);
   if (!task.done && task.priority === "high") li.classList.add("pri-high");
   if (isOverdue(task)) li.classList.add("overdue");
   if (parsingIds.has(task.id)) li.classList.add("parsing");
@@ -373,6 +373,24 @@ function renderEditor(task) {
   dateInput.onchange = () => updateTask(task.id, { dueDate: dateInput.value || null });
   dateRow.appendChild(dateInput);
 
+  // time row — AI pre-fills this; you can set/adjust the exact time yourself
+  const timeRow = document.createElement("div");
+  timeRow.className = "editor-row";
+  timeRow.innerHTML = '<span class="editor-label">Time</span>';
+  const timeInput = document.createElement("input");
+  timeInput.type = "time";
+  if (task.dueTime) timeInput.value = task.dueTime;
+  timeInput.onchange = () => {
+    if (timeInput.value) updateTask(task.id, { dueTime: timeInput.value, dueDate: task.dueDate || todayStr() });
+    else updateTask(task.id, { dueTime: null });
+  };
+  timeRow.appendChild(timeInput);
+  const clearTime = document.createElement("button");
+  clearTime.className = "mini-btn";
+  clearTime.textContent = "Clear";
+  clearTime.onclick = () => updateTask(task.id, { dueTime: null });
+  timeRow.appendChild(clearTime);
+
   // priority row
   const priRow = document.createElement("div");
   priRow.className = "editor-row";
@@ -397,7 +415,7 @@ function renderEditor(task) {
     catRow.appendChild(b);
   }
 
-  wrap.append(head, titleRow, dateRow, priRow, catRow);
+  wrap.append(head, titleRow, dateRow, timeRow, priRow, catRow);
   return wrap;
 }
 

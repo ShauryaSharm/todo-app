@@ -6,8 +6,9 @@
   --text: #f4f4f5;
   --text-muted: #8a8a94;
   --text-faint: #5a5a63;
-  --accent: #f59e0b;        /* amber */
-  --accent-soft: rgba(245, 158, 11, 0.15);
+  --accent: #ededf0;        /* neutral near-white — the only "colors" are the category tags */
+  --accent-soft: rgba(255, 255, 255, 0.12);
+  --on-accent: #0a0a0a;     /* text/icons on top of the accent fill */
   --danger: #f87171;
   --danger-soft: rgba(248, 113, 113, 0.14);
 
@@ -122,7 +123,7 @@ body {
   border: none;
   border-radius: var(--radius);
   background: var(--accent);
-  color: #1a1206;
+  color: var(--on-accent);
   cursor: pointer;
   transition: transform 0.12s var(--ease), filter 0.15s var(--ease);
 }
@@ -304,17 +305,20 @@ body {
   to   { opacity: 1; transform: translateY(0); }
 }
 
-/* priority accent bar on the left edge */
-.task-item.pri-high::before,
-.task-item.overdue::before {
+/* category-colored left bar on every task card (matches the calendar) */
+.task-item::before {
   content: "";
   position: absolute;
-  left: 0; top: 10px; bottom: 10px;
-  width: 3px;
-  border-radius: 3px;
-  background: var(--accent);
+  left: 0; top: 0; bottom: 0;
+  width: 4px;
+  border-radius: var(--radius) 0 0 var(--radius);
+  background: var(--cat-color, var(--cat-other));
 }
+.task-item.pri-high::before { width: 6px; }   /* thicker bar = higher priority */
+
+/* past-due tasks go red, overriding the category color */
 .task-item.overdue::before { background: var(--danger); }
+.task-item.overdue { border-color: color-mix(in srgb, var(--danger) 38%, var(--border)); }
 
 .task-check {
   width: 22px;
@@ -337,7 +341,7 @@ body {
 .task-check svg {
   width: 12px;
   height: 12px;
-  stroke: #1a1206;
+  stroke: var(--on-accent);
   stroke-dasharray: 20;
   stroke-dashoffset: 20;
 }
@@ -370,7 +374,7 @@ body {
 }
 .task-meta:empty { display: none; }
 
-.cat-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.cat-dot { display: none; }  /* category is now shown by the colored side bar */
 
 .chip {
   font-size: 0.72rem;
@@ -419,7 +423,7 @@ body {
   font: inherit;
   font-size: 0.8rem;
   font-weight: 600;
-  color: #1a1206;
+  color: var(--on-accent);
   background: var(--accent);
   border: none;
   border-radius: 999px;
@@ -447,7 +451,8 @@ body {
 .mini-btn:hover { border-color: #34343a; color: var(--text); }
 .mini-btn.active { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
 
-.editor-row input[type="date"] {
+.editor-row input[type="date"],
+.editor-row input[type="time"] {
   font: inherit;
   font-size: 0.8rem;
   background: var(--bg);
@@ -536,27 +541,26 @@ body {
 
 /* colorful, Google-Calendar-style event cards tinted by category */
 .task-list .task-item.cal {
-  background: color-mix(in srgb, var(--cal-color) 22%, var(--surface));
-  border-color: color-mix(in srgb, var(--cal-color) 45%, var(--border));
+  background: color-mix(in srgb, var(--cat-color) 22%, var(--surface));
+  border-color: color-mix(in srgb, var(--cat-color) 45%, var(--border));
 }
 .task-list .task-item.cal:hover {
-  background: color-mix(in srgb, var(--cal-color) 30%, var(--surface));
+  background: color-mix(in srgb, var(--cat-color) 30%, var(--surface));
 }
-.task-list .task-item.cal::before {
-  content: "";
-  position: absolute;
-  left: 0; top: 0; bottom: 0;
-  width: 5px;
-  border-radius: var(--radius) 0 0 var(--radius);
-  background: var(--cal-color);
-}
+.task-list .task-item.cal::before { width: 5px; }
 /* category-tinted checkbox + time on calendar cards */
-.task-list .task-item.cal .task-check { border-color: var(--cal-color); }
-.task-list .task-item.cal.done .task-check { background: var(--cal-color); border-color: var(--cal-color); }
+.task-list .task-item.cal .task-check { border-color: var(--cat-color); }
+.task-list .task-item.cal.done .task-check { background: var(--cat-color); border-color: var(--cat-color); }
 .task-list .task-item.cal .cat-dot { display: none; }
 .task-list .task-item.cal .chip:not(.due-overdue) {
-  color: color-mix(in srgb, var(--cal-color) 70%, var(--text));
+  color: color-mix(in srgb, var(--cat-color) 70%, var(--text));
 }
+/* past-due calendar cards go red too */
+.task-list .task-item.cal.overdue {
+  background: color-mix(in srgb, var(--danger) 18%, var(--surface));
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
+}
+.task-list .task-item.cal.overdue .task-check { border-color: var(--danger); }
 
 /* ---------- empty state ---------- */
 .empty-state {

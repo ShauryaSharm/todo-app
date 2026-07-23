@@ -5,7 +5,7 @@ OUT = os.path.join(os.path.dirname(__file__), "..", "icons")
 os.makedirs(OUT, exist_ok=True)
 
 BG = (10, 10, 10, 255)      # near-black
-FG = (245, 158, 11, 255)    # amber check
+FG = (237, 237, 240, 255)   # near-white check
 
 def make_icon(size, filename, corner_radius_ratio=0.22):
     img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
