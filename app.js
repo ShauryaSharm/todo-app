@@ -297,6 +297,12 @@ function renderTask(task) {
       `<span>${formatDue(task.dueDate, task.dueTime)}</span>`;
     meta.appendChild(chip);
   }
+  if (task.description) {
+    const infoChip = document.createElement("span");
+    infoChip.className = "chip chip-info";
+    infoChip.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8v.01"/></svg><span>Details</span>';
+    meta.appendChild(infoChip);
+  }
   body.appendChild(meta);
   body.onclick = () => { editingId = editingId === task.id ? null : task.id; render(); };
 
@@ -349,6 +355,16 @@ function renderEditor(task) {
   titleInput.onblur = () => { titleInput.value = task.text; cloud?.push(task); };
   titleInput.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); titleInput.blur(); } };
   titleRow.appendChild(titleInput);
+
+  // AI-written description (only shown when there is one)
+  let descRow = null;
+  if (task.description) {
+    descRow = document.createElement("div");
+    descRow.className = "editor-row editor-desc-row";
+    descRow.innerHTML =
+      '<span class="editor-label">Details <span class="ai-tag">AI</span></span>' +
+      `<p class="editor-desc">${escapeHtml(task.description)}</p>`;
+  }
 
   // due date row
   const dateRow = document.createElement("div");
@@ -415,7 +431,9 @@ function renderEditor(task) {
     catRow.appendChild(b);
   }
 
-  wrap.append(head, titleRow, dateRow, timeRow, priRow, catRow);
+  wrap.append(head, titleRow);
+  if (descRow) wrap.appendChild(descRow);
+  wrap.append(dateRow, timeRow, priRow, catRow);
   return wrap;
 }
 
@@ -432,7 +450,7 @@ function addTask(text) {
   const task = {
     id: uid(), text, done: false,
     category: guessCategory(text), priority: "medium",
-    dueDate: null, dueTime: null,
+    dueDate: null, dueTime: null, description: "",
     createdAt: Date.now(), updatedAt: Date.now(),
   };
   tasks.push(task);
@@ -531,6 +549,7 @@ async function parseWithAI(id, text) {
     task.priority = d.priority || task.priority;
     task.dueDate = d.dueDate || task.dueDate;
     task.dueTime = d.dueTime || task.dueTime;
+    if (typeof d.description === "string") task.description = d.description;
     task.updatedAt = Date.now();
     parsingIds.delete(id);
     persist(task);

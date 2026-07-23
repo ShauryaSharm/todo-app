@@ -342,8 +342,8 @@ body {
   width: 12px;
   height: 12px;
   stroke: var(--on-accent);
-  stroke-dasharray: 20;
-  stroke-dashoffset: 20;
+  stroke-dasharray: 30;
+  stroke-dashoffset: 30;
 }
 .task-item.done .task-check svg { animation: draw 0.28s var(--ease) forwards; }
 @keyframes draw { to { stroke-dashoffset: 0; } }
@@ -386,6 +386,7 @@ body {
 .chip.due-overdue { color: var(--danger); }
 .chip.due-today { color: var(--accent); }
 .chip svg { width: 12px; height: 12px; }
+.chip-info { color: var(--text-faint); }
 
 .task-delete {
   border: none;
@@ -475,6 +476,25 @@ body {
   padding: 0.45rem 0.6rem;
 }
 .title-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+
+.editor-desc-row { gap: 0.3rem; }
+.editor-label .ai-tag {
+  margin-left: 0.35rem;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--on-accent);
+  background: var(--accent);
+  border-radius: 4px;
+  padding: 0.05rem 0.32rem;
+  vertical-align: middle;
+}
+.editor-desc {
+  margin: 0;
+  font-size: 0.86rem;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
 
 /* undo toast */
 .toast {

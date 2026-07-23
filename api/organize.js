@@ -46,8 +46,8 @@ export default async function handler(req, res) {
       },
       body: JSON.stringify({
         model: "llama-3.1-8b-instant",
-        temperature: 0,
-        max_tokens: 150,
+        temperature: 0.3,
+        max_tokens: 300,
         response_format: { type: "json_object" },
         messages: [
           {
@@ -60,7 +60,9 @@ export default async function handler(req, res) {
               `- "category": exactly one of ${CATEGORIES.join(", ")}. Choose the best fit (a doctor/pharmacy/gym task is Health; groceries/buying is Shopping; job/meeting/email is Work).\n` +
               `- "priority": one of high, medium, low. Infer from words like "urgent/asap/important" (high) vs routine (low); default medium.\n` +
               `- "dueDate": the resolved date as "YYYY-MM-DD" using the date reference above, or null if no date mentioned.\n` +
-              `- "dueTime": "HH:MM" 24-hour, or null if no time mentioned.`,
+              `- "dueTime": "HH:MM" 24-hour, or null if no time mentioned.\n` +
+              `- "description": a short, genuinely useful elaboration (1-3 sentences) — sub-steps, things to bring/prepare, or context that makes the task easier to act on. ` +
+              `Return an empty string "" if the task is already self-explanatory and nothing would help (e.g. "buy milk", "call mom"). Do not restate the title.`,
           },
           { role: "user", content: text },
         ],
@@ -81,8 +83,9 @@ export default async function handler(req, res) {
     const dueDate = /^\d{4}-\d{2}-\d{2}$/.test(parsed.dueDate || "") ? parsed.dueDate : null;
     const dueTime = /^\d{2}:\d{2}$/.test(parsed.dueTime || "") ? parsed.dueTime : null;
     const title = (typeof parsed.title === "string" && parsed.title.trim()) ? parsed.title.trim() : text;
+    const description = (typeof parsed.description === "string") ? parsed.description.trim().slice(0, 400) : "";
 
-    return res.status(200).json({ title, category, priority, dueDate, dueTime });
+    return res.status(200).json({ title, category, priority, dueDate, dueTime, description });
   } catch (err) {
     return res.status(200).json({ error: "ai_unavailable" });
   }
