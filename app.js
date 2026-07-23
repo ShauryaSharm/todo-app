@@ -273,7 +273,7 @@ function renderTask(task) {
   check.className = "task-check";
   check.setAttribute("aria-label", "Toggle complete");
   check.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l6 6L20 6"/></svg>';
-  check.onclick = () => toggleTask(task.id);
+  check.onclick = () => toggleTask(task.id, li);
 
   // body (text + meta)
   const body = document.createElement("div");
@@ -466,14 +466,30 @@ function updateTask(id, patch) {
   persist(task);
 }
 
-function toggleTask(id) {
+function toggleTask(id, li) {
   const task = tasks.find((t) => t.id === id);
   if (!task) return;
-  task.done = !task.done;
-  task.completedAt = task.done ? Date.now() : null;
+  const becomingDone = !task.done;
+  task.done = becomingDone;
+  task.completedAt = becomingDone ? Date.now() : null;
   task.updatedAt = Date.now();
-  if (task.done && navigator.vibrate) navigator.vibrate(12); // subtle haptic on mobile
-  persist(task);
+  saveLocal();
+  cloud?.push(task);
+
+  if (becomingDone && navigator.vibrate) navigator.vibrate([14, 45, 18]); // little double-tap haptic
+
+  // Play the check animation on the real element before the list re-renders it away,
+  // instead of the task just instantly vanishing.
+  if (becomingDone && li && li.isConnected) {
+    li.querySelector(".task-check").classList.add("pop");
+    li.classList.add("done");
+    setTimeout(() => {
+      li.classList.add("removing");
+      setTimeout(render, 260);
+    }, 420);
+  } else {
+    render();
+  }
 }
 
 function clearCompleted() {
