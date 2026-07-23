@@ -278,6 +278,7 @@ body {
 .task-item {
   display: flex;
   align-items: flex-start;
+  flex-wrap: wrap;
   gap: 0.75rem;
   background: var(--surface);
   border: 1px solid var(--border);
@@ -338,7 +339,14 @@ body {
 .task-item.done .task-check svg { animation: draw 0.28s var(--ease) forwards; }
 @keyframes draw { to { stroke-dashoffset: 0; } }
 
-.task-body { flex: 1; min-width: 0; cursor: pointer; }
+.task-body {
+  flex: 1;
+  min-width: 0;
+  cursor: pointer;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.task-editor, .title-input { -webkit-user-select: text; user-select: text; }
 
 .task-text {
   font-size: 0.98rem;
@@ -386,7 +394,9 @@ body {
 
 /* ---------- inline editor ---------- */
 .task-editor {
-  margin-top: 0.7rem;
+  width: 100%;
+  flex-basis: 100%;
+  margin-top: 0.5rem;
   padding-top: 0.7rem;
   border-top: 1px solid var(--border);
   display: flex;
