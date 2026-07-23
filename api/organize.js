@@ -58,7 +58,11 @@ export default async function handler(req, res) {
               `Return ONLY a JSON object with these keys:\n` +
               `- "title": the task cleaned of any date/time words (e.g. "call mom friday 3pm" -> "Call mom"). Capitalize the first letter.\n` +
               `- "category": exactly one of ${CATEGORIES.join(", ")}. Choose the best fit (a doctor/pharmacy/gym task is Health; groceries/buying is Shopping; job/meeting/email is Work).\n` +
-              `- "priority": one of high, medium, low. Infer from words like "urgent/asap/important" (high) vs routine (low); default medium.\n` +
+              `- "priority": one of high, medium, low. Judge this actively for every task — do not default to medium.\n` +
+              `  HIGH: explicit urgency words (urgent/asap/critical/emergency), real deadlines with consequences (bills, taxes, work deadlines, exams), health/safety issues, or anything time-sensitive happening very soon.\n` +
+              `  LOW: casual/no-pressure items — "someday", "when I get a chance", entertainment, hobbies, minor errands, small chores with no deadline (e.g. "watch that show", "organize bookshelf", "try new recipe").\n` +
+              `  MEDIUM: everything else with normal, real-but-not-urgent stakes (e.g. routine appointments, regular work tasks, calling a friend).\n` +
+              `  Examples: "pay rent tomorrow"=high, "buy milk"=low, "finish project report"=medium, "watch a movie"=low, "submit tax documents"=high, "call mom"=medium.\n` +
               `- "dueDate": the resolved date as "YYYY-MM-DD" using the date reference above, or null if no date mentioned.\n` +
               `- "dueTime": "HH:MM" 24-hour, or null if no time mentioned.\n` +
               `- "description": a short, genuinely useful elaboration (1-3 sentences) — sub-steps, things to bring/prepare, or context that makes the task easier to act on. ` +
