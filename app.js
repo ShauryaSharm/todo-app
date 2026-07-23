@@ -47,6 +47,7 @@ let editingId = null;
 let cloud = null;
 let planOrder = null;              // AI "plan my day" ordering (session only)
 const parsingIds = new Set();      // tasks currently being parsed by AI
+let renderLocked = false;          // true while a checkoff animation is mid-play
 
 function loadLocal() {
   try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || []; }
@@ -161,6 +162,8 @@ function nextUpcoming() {
 
 // ---------- render ----------
 function render() {
+  if (renderLocked) return; // a checkoff animation is mid-play; don't let a sync echo wipe it out
+
   viewBtns.forEach((b) => b.classList.toggle("active", b.dataset.view === view));
   updateCounts();
 
@@ -474,20 +477,24 @@ function toggleTask(id, li) {
   task.completedAt = becomingDone ? Date.now() : null;
   task.updatedAt = Date.now();
   saveLocal();
-  cloud?.push(task);
 
   if (becomingDone && navigator.vibrate) navigator.vibrate([14, 45, 18]); // little double-tap haptic
 
   // Play the check animation on the real element before the list re-renders it away,
-  // instead of the task just instantly vanishing.
+  // instead of the task just instantly vanishing. renderLocked holds off any render()
+  // triggered by the cloud sync echo (Firestore's onSnapshot fires back almost
+  // immediately after a write) so it can't wipe the animating element out mid-play.
   if (becomingDone && li && li.isConnected) {
+    renderLocked = true;
     li.querySelector(".task-check").classList.add("pop");
     li.classList.add("done");
+    cloud?.push(task);
     setTimeout(() => {
       li.classList.add("removing");
-      setTimeout(render, 260);
+      setTimeout(() => { renderLocked = false; render(); }, 260);
     }, 420);
   } else {
+    cloud?.push(task);
     render();
   }
 }
