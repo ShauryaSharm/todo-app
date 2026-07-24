@@ -7,10 +7,19 @@ const WINDOW_MS = 60 * 60 * 1000; // 1 hour
 
 function initAdmin() {
   if (admin.apps.length) return;
-  const raw = process.env.FIREBASE_SERVICE_ACCOUNT || "";
-  // accept either raw JSON or base64-encoded JSON
-  const json = raw.trim().startsWith("{") ? raw : Buffer.from(raw, "base64").toString("utf8");
-  const serviceAccount = JSON.parse(json);
+  const stripBOM = (s) => s.replace(/^﻿/, "");
+  const raw = stripBOM((process.env.FIREBASE_SERVICE_ACCOUNT || "").trim());
+
+  // Accept either raw JSON or base64-encoded JSON. Rather than guessing from the first
+  // character (fragile — a leading BOM or stray whitespace defeats that), just try
+  // parsing it directly first and only fall back to base64-decoding if that fails.
+  let serviceAccount;
+  try {
+    serviceAccount = JSON.parse(raw);
+  } catch {
+    const decoded = stripBOM(Buffer.from(raw, "base64").toString("utf8"));
+    serviceAccount = JSON.parse(decoded);
+  }
   admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
 }
 
