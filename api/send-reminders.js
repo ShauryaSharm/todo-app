@@ -10,22 +10,19 @@ function initAdmin() {
   const stripBOM = (s) => s.replace(/^﻿/, "");
   const raw = stripBOM((process.env.FIREBASE_SERVICE_ACCOUNT || "").trim());
 
-  // Accept either raw JSON or base64-encoded JSON. Rather than guessing from the first
-  // character (fragile — a leading BOM or stray whitespace defeats that), just try
-  // parsing it directly first and only fall back to base64-decoding if that fails.
-  let serviceAccount;
-  try {
-    serviceAccount = JSON.parse(raw);
-  } catch (jsonErr) {
-    try {
-      serviceAccount = JSON.parse(stripBOM(Buffer.from(raw, "base64").toString("utf8").trim()));
-    } catch {
-      // surface the REAL direct-parse error + the shape of the value (no secret leaked)
-      const codes = [...raw.slice(0, 4)].map((c) => c.charCodeAt(0)).join(",");
-      throw new Error(
-        `service account unparseable: jsonError="${jsonErr.message}"; len=${raw.length}; firstCharCodes=[${codes}]; hasPrivateKey=${raw.includes("private_key")}; startsWithBrace=${raw[0] === "{"}`
-      );
-    }
+  // Try, in order: raw JSON; JSON with outer braces re-added (they sometimes get dropped
+  // when pasting); base64-decoded JSON. First one that parses wins.
+  const candidates = [raw, `{${raw}}`, () => stripBOM(Buffer.from(raw, "base64").toString("utf8").trim())];
+  let serviceAccount, jsonErr;
+  for (const c of candidates) {
+    try { serviceAccount = JSON.parse(typeof c === "function" ? c() : c); break; }
+    catch (e) { jsonErr = jsonErr || e; }
+  }
+  if (!serviceAccount) {
+    const codes = [...raw.slice(0, 4)].map((ch) => ch.charCodeAt(0)).join(",");
+    throw new Error(
+      `service account unparseable: jsonError="${jsonErr && jsonErr.message}"; len=${raw.length}; firstCharCodes=[${codes}]; hasPrivateKey=${raw.includes("private_key")}`
+    );
   }
   // private_key sometimes arrives with literal "\n" instead of real newlines — repair it
   if (serviceAccount.private_key) {
