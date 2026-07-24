@@ -741,7 +741,14 @@ async function toggleReminders() {
       userVisibleOnly: true,
       applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
     });
-    const json = sub.toJSON();
+    // Firestore rejects any field that's literally `undefined` (Safari's toJSON()
+    // sometimes includes expirationTime that way instead of omitting/nulling it).
+    const raw = sub.toJSON();
+    const json = {
+      endpoint: raw.endpoint,
+      expirationTime: raw.expirationTime ?? null,
+      keys: { p256dh: raw.keys?.p256dh ?? "", auth: raw.keys?.auth ?? "" },
+    };
     await pushStore.saveSub(subId(sub.endpoint), json);
     setStatus("Reminders enabled 🔔", "ok");
   } catch (err) {
