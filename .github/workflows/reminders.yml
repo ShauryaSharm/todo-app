@@ -1,0 +1,18 @@
+name: Send task reminders
+
+# Pings the reminder endpoint on a schedule so due-time notifications can go out
+# even when the app is closed. GitHub's cron runs about every 5 minutes (it can be
+# a few minutes late under load — that's the free-tier trade-off).
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch: {}   # lets you trigger a run manually to test
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger reminder send
+        run: |
+          curl -fsS -X POST "https://todo-app-tan-nine-89.vercel.app/api/send-reminders" \
+            -H "x-cron-secret: ${{ secrets.CRON_SECRET }}"

@@ -1,5 +1,6 @@
 import { firebaseConfig } from "./firebase-config.js";
 import { AI_ENDPOINT, PLAN_ENDPOINT } from "./ai-config.js";
+import { VAPID_PUBLIC_KEY } from "./notify-config.js";
 
 const STORAGE_KEY = "todo-tasks-v1";
 
@@ -34,6 +35,7 @@ const progressLabel = document.getElementById("progressLabel");
 const planBtn = document.getElementById("planBtn");
 const planNote = document.getElementById("planNote");
 const clearDone = document.getElementById("clearDone");
+const remindBtn = document.getElementById("remindBtn");
 const signinBtn = document.getElementById("signinBtn");
 const signoutBtn = document.getElementById("signoutBtn");
 const userChip = document.getElementById("userChip");
@@ -45,6 +47,7 @@ let tasks = loadLocal();
 let view = "today";
 let editingId = null;
 let cloud = null;
+let pushStore = null;              // { saveSub(sub), removeSub(id) } — set when signed in
 let planOrder = null;              // AI "plan my day" ordering (session only)
 const parsingIds = new Set();      // tasks currently being parsed by AI
 let renderLocked = false;          // true while a checkoff animation is mid-play
@@ -460,6 +463,17 @@ function offsetDate(days) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
+// ---------- reminders: derive an absolute timestamp from due date + time ----------
+function applyRemind(task) {
+  if (task.dueDate && task.dueTime) {
+    const ts = new Date(`${task.dueDate}T${task.dueTime}:00`).getTime(); // local time
+    task.remindAt = Number.isFinite(ts) ? ts : null;
+  } else {
+    task.remindAt = null;
+  }
+  task.notified = false; // re-arm whenever the schedule changes
+}
+
 // ---------- mutations ----------
 function persist(task) { saveLocal(); render(); cloud?.push(task); }
 
@@ -480,6 +494,7 @@ function updateTask(id, patch) {
   const task = tasks.find((t) => t.id === id);
   if (!task) return;
   Object.assign(task, patch, { updatedAt: Date.now() });
+  if ("dueDate" in patch || "dueTime" in patch) applyRemind(task);
   persist(task);
 }
 
@@ -587,6 +602,7 @@ async function parseWithAI(id, text) {
     task.dueDate = d.dueDate || task.dueDate;
     task.dueTime = d.dueTime || task.dueTime;
     if (typeof d.description === "string") task.description = d.description;
+    applyRemind(task);
     task.updatedAt = Date.now();
     parsingIds.delete(id);
     persist(task);
@@ -670,6 +686,69 @@ if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
 }
 
+// ---------- push reminders ----------
+const pushSupported = "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+
+function urlBase64ToUint8Array(base64String) {
+  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const raw = atob(base64);
+  return Uint8Array.from([...raw].map((c) => c.charCodeAt(0)));
+}
+function subId(endpoint) {
+  // stable, Firestore-safe doc id from the subscription endpoint
+  return "sub_" + btoa(endpoint).replace(/[^a-zA-Z0-9]/g, "").slice(-40);
+}
+
+async function updateRemindUI() {
+  // only offer reminders when signed in (delivery is per-account) and supported
+  if (!pushStore || !VAPID_PUBLIC_KEY || !pushSupported) { remindBtn.hidden = true; return; }
+  remindBtn.hidden = false;
+  let on = false;
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    on = Notification.permission === "granted" && !!(await reg.pushManager.getSubscription());
+  } catch { on = false; }
+  remindBtn.classList.toggle("on", on);
+  remindBtn.title = on ? "Reminders on — tap to turn off" : "Enable reminders";
+}
+
+async function toggleReminders() {
+  if (!pushStore) return;
+  const reg = await navigator.serviceWorker.ready;
+  const existing = await reg.pushManager.getSubscription();
+
+  if (existing && Notification.permission === "granted") {
+    // turn off
+    try { await pushStore.removeSub(subId(existing.endpoint)); } catch {}
+    await existing.unsubscribe().catch(() => {});
+    setStatus("Reminders turned off.", "ok");
+    updateRemindUI();
+    return;
+  }
+
+  const perm = await Notification.requestPermission();
+  if (perm !== "granted") {
+    setStatus("Notifications are blocked — enable them in your device settings.", "err");
+    return;
+  }
+  try {
+    const sub = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+    });
+    const json = sub.toJSON();
+    await pushStore.saveSub(subId(sub.endpoint), json);
+    setStatus("Reminders enabled 🔔", "ok");
+  } catch (err) {
+    console.error(err);
+    setStatus("Couldn't enable reminders. Make sure the app is installed to your home screen.", "err");
+  }
+  updateRemindUI();
+}
+
+remindBtn.addEventListener("click", toggleReminders);
+
 // ---------- cloud sync ----------
 if (firebaseConfig) {
   initCloudSync(firebaseConfig).catch((err) => {
@@ -696,6 +775,7 @@ async function initCloudSync(config) {
     await import("https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js");
   const { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot } =
     await import("https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js");
+  const subDoc = (uid, id) => doc(collection(db, "users", uid, "pushSubs"), id);
 
   const app = initializeApp(config);
   const auth = getAuth(app);
@@ -712,7 +792,8 @@ async function initCloudSync(config) {
   onAuthStateChanged(auth, async (user) => {
     if (unsub) { unsub(); unsub = null; }
     if (!user) {
-      cloud = null; signinBtn.hidden = false; userChip.hidden = true; setStatus("");
+      cloud = null; pushStore = null; signinBtn.hidden = false; userChip.hidden = true;
+      setStatus(""); updateRemindUI();
       return;
     }
     signinBtn.hidden = true; userChip.hidden = false;
@@ -726,6 +807,11 @@ async function initCloudSync(config) {
       push: (task) => setDoc(doc(tasksRef, task.id), task, { merge: true }).catch(() => {}),
       remove: (id) => deleteDoc(doc(tasksRef, id)).catch(() => {}),
     };
+    pushStore = {
+      saveSub: (id, sub) => setDoc(subDoc(user.uid, id), sub),
+      removeSub: (id) => deleteDoc(subDoc(user.uid, id)),
+    };
+    updateRemindUI();
 
     unsub = onSnapshot(tasksRef, (snap) => {
       tasks = snap.docs.map((d) => d.data());

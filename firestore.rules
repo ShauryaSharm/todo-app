@@ -4,5 +4,9 @@ service cloud.firestore {
     match /users/{userId}/tasks/{taskId} {
       allow read, write: if request.auth != null && request.auth.uid == userId;
     }
+    // a signed-in user can register/remove this device's push subscription
+    match /users/{userId}/pushSubs/{subId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
   }
 }

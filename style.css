@@ -73,7 +73,7 @@ body {
   margin: 0;
 }
 
-.account { display: flex; align-items: center; }
+.account { display: flex; align-items: center; gap: 0.5rem; }
 
 .signin-btn, #signoutBtn {
   font: inherit;
@@ -89,6 +89,24 @@ body {
 }
 .signin-btn:hover, #signoutBtn:hover { background: var(--surface-hover); border-color: #34343a; transform: translateY(-1px); }
 .signin-btn:active, #signoutBtn:active { transform: scale(0.95); }
+
+.icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background 0.15s var(--ease), color 0.15s var(--ease), border-color 0.15s var(--ease), transform 0.12s var(--ease);
+}
+.icon-btn svg { width: 17px; height: 17px; }
+.icon-btn:hover { color: var(--text); border-color: #34343a; transform: translateY(-1px); }
+.icon-btn:active { transform: scale(0.92); }
+.icon-btn.on { color: var(--cat-shopping); border-color: color-mix(in srgb, var(--cat-shopping) 55%, var(--border)); background: color-mix(in srgb, var(--cat-shopping) 15%, var(--surface)); }
 
 .user-chip { display: flex; align-items: center; gap: 0.5rem; }
 .user-chip img { width: 28px; height: 28px; border-radius: 50%; object-fit: cover; }
