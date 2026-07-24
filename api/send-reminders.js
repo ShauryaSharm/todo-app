@@ -49,24 +49,25 @@ export default async function handler(req, res) {
     const db = admin.firestore();
     const now = Date.now();
 
-    // Tasks whose reminder time has arrived. Single-field range → no composite index needed.
-    const snap = await db
-      .collectionGroup("tasks")
-      .where("remindAt", "<=", now)
-      .get();
-
     let sent = 0, cleaned = 0, considered = 0;
 
-    for (const doc of snap.docs) {
+    // Loop per-user rather than a collectionGroup query, so we only rely on the
+    // automatic collection-scope index (a collectionGroup query would require a
+    // manually-enabled index). listDocuments() also finds users that only have
+    // subcollections and no parent doc.
+    const userRefs = await db.collection("users").listDocuments();
+    for (const userRef of userRefs) {
+      const uid = userRef.id;
+      const snap = await userRef.collection("tasks").where("remindAt", "<=", now).get();
+
+      let subsSnap = null;
+      for (const doc of snap.docs) {
       const task = doc.data();
       if (task.done || task.notified) continue;
       if (typeof task.remindAt !== "number" || task.remindAt < now - WINDOW_MS) continue;
       considered++;
 
-      const uid = doc.ref.parent.parent && doc.ref.parent.parent.id;
-      if (!uid) continue;
-
-      const subsSnap = await db.collection("users").doc(uid).collection("pushSubs").get();
+      if (!subsSnap) subsSnap = await userRef.collection("pushSubs").get();
       const payload = JSON.stringify({
         title: "Task due",
         body: task.text || "You have a task due.",
@@ -91,6 +92,7 @@ export default async function handler(req, res) {
       // mark notified so it doesn't fire again (even if there were no live subs)
       await doc.ref.update({ notified: true }).catch(() => {});
       if (delivered) sent++;
+      }
     }
 
     return res.status(200).json({ ok: true, considered, sent, cleaned });
