@@ -55,8 +55,14 @@ export default async function handler(req, res) {
             content:
               `You parse a raw to-do input into structured JSON. Today is ${today || "unknown"} (${weekday || ""}).\n\n` +
               buildDateReference(today) + `\n\n` +
+              `The input may be phrased as a reminder or alarm, e.g. "remind me to take medicine at 8pm", ` +
+              `"set an alarm for the meeting at 9am", "notify me to call the bank tomorrow at noon", "wake me up at 6:30", ` +
+              `"don't forget to pay rent on the 1st". Treat these as tasks: strip the reminder/alarm framing from the title ` +
+              `and always extract the time and date they mention into dueTime/dueDate.\n\n` +
               `Return ONLY a JSON object with these keys:\n` +
-              `- "title": the task cleaned of any date/time words (e.g. "call mom friday 3pm" -> "Call mom"). Capitalize the first letter.\n` +
+              `- "title": the task cleaned of any date/time words AND of reminder/alarm framing like ` +
+              `"remind me to", "set an alarm for", "set a reminder to", "notify me to", "alert me to", "wake me up", "ping me to", "don't forget to". ` +
+              `E.g. "call mom friday 3pm" -> "Call mom"; "remind me to take medicine at 8pm" -> "Take medicine"; "set an alarm for gym at 6am" -> "Gym". Capitalize the first letter.\n` +
               `- "category": exactly one of ${CATEGORIES.join(", ")}. Choose the best fit (a doctor/pharmacy/gym task is Health; groceries/buying is Shopping; job/meeting/email is Work).\n` +
               `- "priority": one of high, medium, low. Judge this actively for every task — do not default to medium.\n` +
               `  HIGH: explicit urgency words (urgent/asap/critical/emergency), real deadlines with consequences (bills, taxes, work deadlines, exams), health/safety issues, or anything time-sensitive happening very soon.\n` +
@@ -64,7 +70,8 @@ export default async function handler(req, res) {
               `  MEDIUM: everything else with normal, real-but-not-urgent stakes (e.g. routine appointments, regular work tasks, calling a friend).\n` +
               `  Examples: "pay rent tomorrow"=high, "buy milk"=low, "finish project report"=medium, "watch a movie"=low, "submit tax documents"=high, "call mom"=medium.\n` +
               `- "dueDate": the resolved date as "YYYY-MM-DD" using the date reference above, or null if no date mentioned.\n` +
-              `- "dueTime": "HH:MM" 24-hour, or null if no time mentioned.\n` +
+              `- "dueTime": "HH:MM" 24-hour, or null if no time mentioned. This is what triggers the reminder notification, so ` +
+              `always fill it in whenever a time is stated or clearly implied (e.g. "at 8pm"->"20:00", "wake me at 6:30"->"06:30", "at noon"->"12:00", "tonight"->"20:00", "first thing"->"08:00").\n` +
               `- "description": a short, genuinely useful elaboration (1-3 sentences) — sub-steps, things to bring/prepare, or context that makes the task easier to act on. ` +
               `Return an empty string "" if the task is already self-explanatory and nothing would help (e.g. "buy milk", "call mom"). Do not restate the title.`,
           },
