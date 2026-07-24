@@ -208,7 +208,11 @@ function render() {
     return;
   }
 
-  for (const task of list) taskList.appendChild(renderTask(task));
+  list.forEach((task, i) => {
+    const li = renderTask(task);
+    li.style.animationDelay = `${Math.min(i * 35, 350)}ms`;
+    taskList.appendChild(li);
+  });
 }
 
 function renderCalendar() {
@@ -227,9 +231,10 @@ function renderCalendar() {
   }
 
   const thisYear = new Date().getFullYear();
-  let lastMonth = null, lastDate = null;
+  let lastMonth = null, lastDate = null, i = 0;
 
   for (const task of items) {
+    i++;
     const d = new Date(task.dueDate + "T00:00:00");
     const monthKey = `${d.getFullYear()}-${d.getMonth()}`;
 
@@ -259,6 +264,7 @@ function renderCalendar() {
 
     const li = renderTask(task);
     li.classList.add("cal");
+    li.style.animationDelay = `${Math.min(i * 30, 350)}ms`;
     taskList.appendChild(li);
   }
 }
@@ -620,10 +626,16 @@ addForm.addEventListener("submit", (e) => {
 
 viewBtns.forEach((btn) => {
   btn.addEventListener("click", () => {
+    if (btn.dataset.view === view) return;
     view = btn.dataset.view;
     editingId = null;
-    render();
     btn.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
+    // quick crossfade instead of an instant content swap
+    taskList.classList.add("switching");
+    setTimeout(() => {
+      render();
+      taskList.classList.remove("switching");
+    }, 110);
   });
 });
 

@@ -47,6 +47,18 @@ body {
 }
 
 /* ---------- top bar ---------- */
+/* one-time cascade as the app first paints */
+@keyframes pageIn {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.topbar, .sync-status, .add-form, .views {
+  animation: pageIn 0.5s var(--ease) both;
+}
+.sync-status { animation-delay: 0.05s; }
+.add-form { animation-delay: 0.1s; }
+.views { animation-delay: 0.16s; }
+
 .topbar {
   display: flex;
   align-items: center;
@@ -73,9 +85,10 @@ body {
   border-radius: 999px;
   padding: 0.4rem 0.85rem;
   cursor: pointer;
-  transition: background 0.15s var(--ease), border-color 0.15s var(--ease);
+  transition: background 0.15s var(--ease), border-color 0.15s var(--ease), transform 0.12s var(--ease);
 }
-.signin-btn:hover, #signoutBtn:hover { background: var(--surface-hover); border-color: #34343a; }
+.signin-btn:hover, #signoutBtn:hover { background: var(--surface-hover); border-color: #34343a; transform: translateY(-1px); }
+.signin-btn:active, #signoutBtn:active { transform: scale(0.95); }
 
 .user-chip { display: flex; align-items: center; gap: 0.5rem; }
 .user-chip img { width: 28px; height: 28px; border-radius: 50%; object-fit: cover; }
@@ -127,7 +140,7 @@ body {
   cursor: pointer;
   transition: transform 0.12s var(--ease), filter 0.15s var(--ease);
 }
-.add-form button:hover { filter: brightness(1.08); }
+.add-form button:hover { filter: brightness(1.08); transform: translateY(-1px); }
 .add-form button:active { transform: scale(0.92); }
 .add-form button svg { width: 22px; height: 22px; }
 
@@ -153,9 +166,10 @@ body {
   position: relative;
   white-space: nowrap;
   flex-shrink: 0;
-  transition: color 0.15s var(--ease);
+  transition: color 0.15s var(--ease), transform 0.12s var(--ease);
 }
 .view-btn:hover { color: var(--text); }
+.view-btn:active { transform: scale(0.95); }
 .view-btn.active { color: var(--text); }
 .view-btn.active::after {
   content: "";
@@ -191,7 +205,8 @@ body {
   cursor: pointer;
   transition: all 0.15s var(--ease);
 }
-.clear-done:hover { color: var(--danger); border-color: var(--danger); }
+.clear-done:hover { color: var(--danger); border-color: var(--danger); transform: translateY(-1px); }
+.clear-done:active { transform: scale(0.95); }
 
 /* ---------- progress ---------- */
 .progress {
@@ -237,7 +252,7 @@ body {
   white-space: nowrap;
   transition: filter 0.15s var(--ease), transform 0.12s var(--ease);
 }
-.plan-btn:hover { filter: brightness(1.15); }
+.plan-btn:hover { filter: brightness(1.15); transform: translateY(-1px); }
 .plan-btn:active { transform: scale(0.95); }
 .plan-btn svg { width: 14px; height: 14px; }
 .plan-btn.loading { opacity: 0.6; pointer-events: none; }
@@ -279,7 +294,10 @@ body {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+  opacity: 1;
+  transition: opacity 0.11s var(--ease);
 }
+.task-list.switching { opacity: 0; }
 
 .task-item {
   display: flex;
@@ -294,7 +312,7 @@ body {
   animation: slideIn 0.32s var(--ease) both;
   transition: background 0.15s var(--ease), border-color 0.15s var(--ease), opacity 0.3s var(--ease), transform 0.3s var(--ease);
 }
-.task-item:hover { background: var(--surface-hover); }
+.task-item:hover { background: var(--surface-hover); transform: translateY(-1px); }
 .task-item.removing {
   opacity: 0;
   transform: translateX(-16px) scale(0.97);
@@ -433,9 +451,10 @@ body {
   padding: 0.35rem;
   flex-shrink: 0;
   border-radius: 8px;
-  transition: color 0.15s var(--ease), background 0.15s var(--ease);
+  transition: color 0.15s var(--ease), background 0.15s var(--ease), transform 0.12s var(--ease);
 }
-.task-delete:hover { color: var(--danger); background: var(--danger-soft); }
+.task-delete:hover { color: var(--danger); background: var(--danger-soft); transform: scale(1.1); }
+.task-delete:active { transform: scale(0.9); }
 
 /* ---------- inline editor ---------- */
 .task-editor {
@@ -484,7 +503,8 @@ body {
   cursor: pointer;
   transition: all 0.14s var(--ease);
 }
-.mini-btn:hover { border-color: #34343a; color: var(--text); }
+.mini-btn:hover { border-color: #34343a; color: var(--text); transform: translateY(-1px); }
+.mini-btn:active { transform: scale(0.94); }
 .mini-btn.active { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
 
 .editor-row input[type="date"],
@@ -573,6 +593,7 @@ body {
   font-weight: 700;
   letter-spacing: 0.1em;
   margin: 1.1rem 0 0.1rem;
+  animation: slideIn 0.32s var(--ease) both;
 }
 .cal-month:first-child { margin-top: 0; }
 
@@ -582,6 +603,7 @@ body {
   align-items: baseline;
   gap: 0.5rem;
   margin: 0.85rem 0 0.15rem;
+  animation: slideIn 0.32s var(--ease) both;
 }
 .cal-daynum {
   font-size: 1.15rem;

@@ -1,4 +1,4 @@
-const CACHE_NAME = "todo-shell-v17";
+const CACHE_NAME = "todo-shell-v18";
 const SHELL_FILES = [
   "./",
   "./index.html",
