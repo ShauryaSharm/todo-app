@@ -199,10 +199,18 @@ function render() {
 
   emptyState.hidden = list.length > 0;
   if (list.length === 0) {
+    emptyState.classList.remove("celebrate");
     let msg = EMPTY_MSG[view];
     if (view === "today") {
-      const next = nextUpcoming();
-      if (next) msg = `Nothing due today.<br><span class="muted">Next up: <b>${escapeHtml(next.text)}</b> · ${formatDue(next.dueDate, next.dueTime)}</span>`;
+      if (todayTasks.length > 0 && todayDone === todayTasks.length) {
+        // finished everything due today — reward the moment
+        emptyState.classList.add("celebrate");
+        msg = '<span class="celebrate-check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l6 6L20 6"/></svg></span>'
+          + 'All done for today.<br><span class="muted">Everything’s checked off — nice work.</span>';
+      } else {
+        const next = nextUpcoming();
+        if (next) msg = `Nothing due today.<br><span class="muted">Next up: <b>${escapeHtml(next.text)}</b> · ${formatDue(next.dueDate, next.dueTime)}</span>`;
+      }
     }
     emptyState.innerHTML = msg;
     return;
@@ -622,6 +630,19 @@ addForm.addEventListener("submit", (e) => {
   if (!text) return;
   addTask(text);
   taskInput.value = "";
+  taskInput.focus(); // keep focus so you can rattle off several tasks in a row
+});
+
+// Escape closes an open editor, or drops focus out of the input
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  if (editingId) { editingId = null; render(); }
+  else if (document.activeElement === taskInput) taskInput.blur();
+});
+
+// Click outside an open task card closes its editor
+document.addEventListener("click", (e) => {
+  if (editingId && !e.target.closest(".task-item")) { editingId = null; render(); }
 });
 
 viewBtns.forEach((btn) => {
@@ -659,9 +680,14 @@ if (firebaseConfig) {
   signinBtn.hidden = true;
 }
 
+let statusTimer = null;
 function setStatus(msg, cls) {
+  clearTimeout(statusTimer);
   syncStatus.textContent = msg;
   syncStatus.className = "sync-status" + (cls ? " " + cls : "");
+  syncStatus.style.opacity = "1";
+  // "Synced" is a transient confirmation — let it fade so it isn't permanent clutter.
+  if (cls === "ok") statusTimer = setTimeout(() => { syncStatus.style.opacity = "0"; }, 2500);
 }
 
 async function initCloudSync(config) {
