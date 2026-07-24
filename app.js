@@ -465,6 +465,10 @@ function offsetDate(days) {
 
 // ---------- reminders: derive an absolute timestamp from due date + time ----------
 function applyRemind(task) {
+  // A time with no date should still get a reminder — default silently to today rather
+  // than dropping it, since a bare dueTime with no dueDate would otherwise never fire.
+  if (task.dueTime && !task.dueDate) task.dueDate = todayStr();
+
   if (task.dueDate && task.dueTime) {
     const ts = new Date(`${task.dueDate}T${task.dueTime}:00`).getTime(); // local time
     task.remindAt = Number.isFinite(ts) ? ts : null;

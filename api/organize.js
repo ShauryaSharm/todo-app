@@ -69,7 +69,7 @@ export default async function handler(req, res) {
               `  LOW: casual/no-pressure items — "someday", "when I get a chance", entertainment, hobbies, minor errands, small chores with no deadline (e.g. "watch that show", "organize bookshelf", "try new recipe").\n` +
               `  MEDIUM: everything else with normal, real-but-not-urgent stakes (e.g. routine appointments, regular work tasks, calling a friend).\n` +
               `  Examples: "pay rent tomorrow"=high, "buy milk"=low, "finish project report"=medium, "watch a movie"=low, "submit tax documents"=high, "call mom"=medium.\n` +
-              `- "dueDate": the resolved date as "YYYY-MM-DD" using the date reference above, or null if no date mentioned.\n` +
+              `- "dueDate": the resolved date as "YYYY-MM-DD" using the date reference above. If a time is given but no date, use today's date — never leave dueDate null when dueTime is set. Only null if truly no date or time was mentioned at all.\n` +
               `- "dueTime": "HH:MM" 24-hour, or null if no time mentioned. This is what triggers the reminder notification, so ` +
               `always fill it in whenever a time is stated or clearly implied (e.g. "at 8pm"->"20:00", "wake me at 6:30"->"06:30", "at noon"->"12:00", "tonight"->"20:00", "first thing"->"08:00").\n` +
               `- "description": a short, genuinely useful elaboration (1-3 sentences) — sub-steps, things to bring/prepare, or context that makes the task easier to act on. ` +
