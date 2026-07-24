@@ -16,9 +16,20 @@ function initAdmin() {
   let serviceAccount;
   try {
     serviceAccount = JSON.parse(raw);
-  } catch {
-    const decoded = stripBOM(Buffer.from(raw, "base64").toString("utf8"));
-    serviceAccount = JSON.parse(decoded);
+  } catch (jsonErr) {
+    try {
+      serviceAccount = JSON.parse(stripBOM(Buffer.from(raw, "base64").toString("utf8").trim()));
+    } catch {
+      // surface the REAL direct-parse error + the shape of the value (no secret leaked)
+      const codes = [...raw.slice(0, 4)].map((c) => c.charCodeAt(0)).join(",");
+      throw new Error(
+        `service account unparseable: jsonError="${jsonErr.message}"; len=${raw.length}; firstCharCodes=[${codes}]; hasPrivateKey=${raw.includes("private_key")}; startsWithBrace=${raw[0] === "{"}`
+      );
+    }
+  }
+  // private_key sometimes arrives with literal "\n" instead of real newlines — repair it
+  if (serviceAccount.private_key) {
+    serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, "\n");
   }
   admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
 }
