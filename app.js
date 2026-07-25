@@ -719,24 +719,25 @@ async function updateRemindUI() {
 
 async function toggleReminders() {
   if (!pushStore) return;
-  const reg = await navigator.serviceWorker.ready;
-  const existing = await reg.pushManager.getSubscription();
-
-  if (existing && Notification.permission === "granted") {
-    // turn off
-    try { await pushStore.removeSub(subId(existing.endpoint)); } catch {}
-    await existing.unsubscribe().catch(() => {});
-    setStatus("Reminders turned off.", "ok");
-    updateRemindUI();
-    return;
-  }
-
-  const perm = await Notification.requestPermission();
-  if (perm !== "granted") {
-    setStatus("Notifications are blocked — enable them in your device settings.", "err");
-    return;
-  }
   try {
+    const reg = await navigator.serviceWorker.ready;
+    const existing = await reg.pushManager.getSubscription();
+
+    if (existing && Notification.permission === "granted") {
+      // turn off
+      try { await pushStore.removeSub(subId(existing.endpoint)); } catch {}
+      await existing.unsubscribe().catch(() => {});
+      setStatus("Reminders turned off.", "ok");
+      updateRemindUI();
+      return;
+    }
+
+    const perm = await Notification.requestPermission();
+    if (perm !== "granted") {
+      setStatus(`Notifications ${perm} — enable them in your device settings.`, "err");
+      return;
+    }
+
     const sub = await reg.pushManager.subscribe({
       userVisibleOnly: true,
       applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
@@ -752,8 +753,11 @@ async function toggleReminders() {
     await pushStore.saveSub(subId(sub.endpoint), json);
     setStatus("Reminders enabled 🔔", "ok");
   } catch (err) {
+    // Wraps the WHOLE flow, not just the subscribe step, so nothing fails silently —
+    // whatever actually breaks (SW readiness, permission call, subscribe, Firestore
+    // save) shows its real name+message right on screen.
     console.error(err);
-    setStatus("Couldn't enable reminders. Make sure the app is installed to your home screen.", "err");
+    setStatus(`Reminder error: ${(err && err.name) || "Error"} — ${(err && err.message) || err}`, "err");
   }
   updateRemindUI();
 }
