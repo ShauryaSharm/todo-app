@@ -2,6 +2,9 @@ import admin from "firebase-admin";
 
 const TZ = "America/Los_Angeles";
 const TEST_WORDS = /\b(quiz|test|exam|midterm|final|assessment)\b/i;
+// Ignore work that's been overdue longer than this, so old missing assignments
+// from earlier in the term don't flood the list.
+const MAX_OVERDUE_MS = 20 * 24 * 60 * 60 * 1000;
 
 function initAdmin() {
   if (admin.apps.length) return;
@@ -96,7 +99,9 @@ export default async function handler(req, res) {
         if (!a.published || !a.due_at) continue;             // skip undated/unpublished
         const sub = a.submission || {};
         if (sub.submitted_at || sub.workflow_state === "graded") continue; // already done
-        pending.push({ course: c.name, a, dueMs: new Date(a.due_at).getTime() });
+        const dueMs = new Date(a.due_at).getTime();
+        if (now - dueMs > MAX_OVERDUE_MS) continue;          // too old to be worth showing
+        pending.push({ course: c.name, a, dueMs });
       }
     }
 
