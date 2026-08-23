@@ -1,3 +1,18 @@
 .DS_Store
 node_modules/
 package-lock.json
+
+# --- Secrets / local-only integrations ---
+# This repo is PUBLIC (required for free GitHub Pages), so anything holding an
+# API token or credential must never be committed. Broad patterns on purpose.
+.env
+.env.*
+*.env
+secrets/
+credentials/
+*credentials*.json
+*token*.json
+*_secret*
+canvas/
+canvas*/
+*canvas*/
