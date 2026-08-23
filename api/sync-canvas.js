@@ -179,7 +179,8 @@ export default async function handler(req, res) {
     // previously-imported (and since-deleted) work gets pulled in fresh.
     const syncedRef = db.collection("users").doc(uid).collection("canvasSynced");
     let cleared = 0;
-    if (req.query.reset === "1") {
+    // Accept either a header or a query param — some shells mangle query strings.
+    if (req.query.reset === "1" || req.headers["x-canvas-reset"] === "1") {
       const old = await syncedRef.get();
       for (let i = 0; i < old.docs.length; i += 400) {
         const batch = db.batch();
