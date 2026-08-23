@@ -163,18 +163,19 @@ export default async function handler(req, res) {
     });
 
     const now = Date.now();
-    const pending = [];
+    const pending = [];     // still needs doing -> should exist as an open task
+    const submitted = [];   // turned in / graded -> matching task should be checked off
     for (const c of courses) {
       const assignments = await canvasGetAll(
         `/api/v1/courses/${c.id}/assignments`, { "include[]": "submission" }
       );
       for (const a of assignments) {
         if (!a.published || !a.due_at) continue;             // skip undated/unpublished
-        const sub = a.submission || {};
-        if (sub.submitted_at || sub.workflow_state === "graded") continue; // already done
         const dueMs = new Date(a.due_at).getTime();
         if (now - dueMs > MAX_OVERDUE_MS) continue;          // too old to be worth showing
-        pending.push({ course: c.name, a, dueMs });
+        const sub = a.submission || {};
+        if (sub.submitted_at || sub.workflow_state === "graded") submitted.push({ a });
+        else pending.push({ course: c.name, a, dueMs });
       }
     }
 
@@ -209,8 +210,48 @@ export default async function handler(req, res) {
 
     const tasksRef = db.collection("users").doc(uid).collection("tasks");
 
-    // Build the list of genuinely-new items first, with the facts the model needs.
-    const fresh = pending.filter(({ a }) => !seen.has(String(a.id))).map(({ course, a, dueMs }) => {
+    // Index the Canvas-imported tasks that already exist, so this run can reconcile
+    // them instead of blindly re-adding.
+    const existingSnap = cleared ? { docs: [] } : await tasksRef.get();
+    const byCanvasId = new Map();
+    for (const d of existingSnap.docs) {
+      const t = d.data();
+      if (t.canvasId) byCanvasId.set(String(t.canvasId), { ref: d.ref, task: t });
+    }
+
+    let updated = 0, completed = 0;
+
+    // 1. Anything turned in on Canvas gets checked off here (if it isn't already).
+    for (const { a } of submitted) {
+      const hit = byCanvasId.get(String(a.id));
+      if (!hit || hit.task.done) continue;
+      await hit.ref.update({ done: true, completedAt: Date.now(), updatedAt: Date.now() });
+      completed++;
+    }
+
+    // 2. Still-pending work that's already on the list: refresh the facts Canvas owns
+    //    (due date/time) without touching the title, category or done state, so edits
+    //    made in the app survive a sync.
+    for (const { a, dueMs } of pending) {
+      const hit = byCanvasId.get(String(a.id));
+      if (!hit) continue;
+      const { date, time } = localParts(a.due_at);
+      const t = hit.task;
+      if (t.dueDate === date && t.dueTime === time) continue;   // nothing changed
+      await hit.ref.update({
+        dueDate: date,
+        dueTime: time,
+        remindAt: dueMs,
+        notified: dueMs < now,          // re-arm the reminder for a moved-forward due date
+        updatedAt: Date.now(),
+      });
+      updated++;
+    }
+
+    // 3. Genuinely new work: never imported before, and not already on the list.
+    const fresh = pending
+      .filter(({ a }) => !seen.has(String(a.id)) && !byCanvasId.has(String(a.id)))
+      .map(({ course, a, dueMs }) => {
       const { date, time } = localParts(a.due_at);
       const overdue = dueMs < now;
       return {
@@ -282,6 +323,8 @@ export default async function handler(req, res) {
       added,
       aiNamed: ai.size,
       aiError,
+      updated,
+      completed,
       cleared,
       removedTasks,
       overdue: fresh.filter((f) => f.overdue).length,
