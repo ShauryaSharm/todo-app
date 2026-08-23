@@ -1,5 +1,8 @@
 import admin from "firebase-admin";
 
+// Canvas pagination plus the AI naming pass can run past Vercel's 10s default.
+export const maxDuration = 60;
+
 const TZ = "America/Los_Angeles";
 const TEST_WORDS = /\b(quiz|test|exam|midterm|final|assessment)\b/i;
 // Ignore work that's been overdue longer than this, so old missing assignments
@@ -61,6 +64,72 @@ function shortCourse(name) {
   return String(name || "").split(/\s+-\s+/)[0].trim();
 }
 
+function stripHtml(s) {
+  return String(s || "").replace(/<[^>]*>/g, " ").replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
+}
+
+const CATEGORIES = ["Work", "Personal", "Shopping", "Health", "Urgent", "Other"];
+
+// Let the same model the app uses for quick-add decide how imported Canvas work is
+// named and presented, so it reads like a task the user typed rather than a raw
+// Canvas string ("HW 4.2 - Ch4 (Sec 4.2) [PERIOD 3]"). Falls back to plain
+// formatting if the model is unavailable — the sync must never depend on it.
+async function formatWithAI(batch) {
+  const key = (process.env.GROQ_API_KEY || "").trim();
+  if (!key) return null;
+
+  const lines = batch.map((b, i) =>
+    `${i}. name="${b.a.name || ""}" | course="${shortCourse(b.course)}" | ` +
+    `${b.isTest ? "test/quiz" : "assignment"}${b.a.points_possible ? ` | ${b.a.points_possible} pts` : ""} | ` +
+    `due ${b.dueLabel}${b.overdue ? " (OVERDUE)" : ""}` +
+    (b.blurb ? ` | details="${b.blurb.slice(0, 200)}"` : "")
+  ).join("\n");
+
+  const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: "llama-3.1-8b-instant",
+      temperature: 0.3,
+      max_tokens: 1200,
+      response_format: { type: "json_object" },
+      messages: [{
+        role: "system",
+        content:
+          `Rewrite school assignments as clean to-do items. Return ONLY JSON: ` +
+          `{"items":[{"i":<index>,"title":...,"category":...,"priority":...,"description":...}]} ` +
+          `with one entry per input line, same index.\n` +
+          `- "title": short, natural, scannable — how a student would write it themselves. ` +
+          `Strip course codes, section numbers, period markers, and bracketed junk. Lead with the subject ` +
+          `when it isn't obvious (e.g. "HW 4.2 - Polynomial Long Div (Ch4) [P3]" + course "Algebra 2" -> ` +
+          `"Algebra 2 homework: polynomial long division"). Sentence case, no trailing period, under 60 chars.\n` +
+          `- "category": exactly one of ${CATEGORIES.join(", ")}. School work is "Work" unless it's overdue, ` +
+          `in which case "Urgent".\n` +
+          `- "priority": high, medium, or low. Tests/quizzes, overdue work, and high point values are high; ` +
+          `small routine homework is low; everything else medium.\n` +
+          `- "description": one short line of useful context (course, what it is, points). No URLs. ` +
+          `Don't restate the title.`,
+      }, { role: "user", content: lines }],
+    }),
+  });
+  if (!res.ok) return null;
+  const data = await res.json();
+  const parsed = JSON.parse(data.choices?.[0]?.message?.content || "{}");
+  const out = new Map();
+  for (const it of parsed.items || []) {
+    if (typeof it.i !== "number") continue;
+    out.set(it.i, {
+      title: typeof it.title === "string" ? it.title.trim().slice(0, 120) : null,
+      category: CATEGORIES.find((c) => c.toLowerCase() === String(it.category || "").toLowerCase()) || null,
+      priority: ["high", "medium", "low"].includes(String(it.priority || "").toLowerCase())
+        ? String(it.priority).toLowerCase() : null,
+      description: typeof it.description === "string" ? it.description.trim().slice(0, 300) : null,
+    });
+  }
+  return out;
+}
+
 export default async function handler(req, res) {
   const secret = req.query.secret || req.headers["x-cron-secret"];
   if (!process.env.CRON_SECRET || secret !== process.env.CRON_SECRET) {
@@ -111,32 +180,54 @@ export default async function handler(req, res) {
     const seen = new Set(seenSnap.docs.map((d) => d.id));
 
     const tasksRef = db.collection("users").doc(uid).collection("tasks");
-    let added = 0;
 
-    for (const { course, a, dueMs } of pending) {
-      const key = String(a.id);
-      if (seen.has(key)) continue;
-
+    // Build the list of genuinely-new items first, with the facts the model needs.
+    const fresh = pending.filter(({ a }) => !seen.has(String(a.id))).map(({ course, a, dueMs }) => {
       const { date, time } = localParts(a.due_at);
       const overdue = dueMs < now;
-      const soon = dueMs - now < 2 * 24 * 60 * 60 * 1000;
-      const isTest = a.quiz_id || (a.submission_types || []).includes("online_quiz") || TEST_WORDS.test(a.name || "");
+      return {
+        course, a, dueMs, date, time, overdue,
+        soon: dueMs - now < 2 * 24 * 60 * 60 * 1000,
+        isTest: !!(a.quiz_id || (a.submission_types || []).includes("online_quiz") || TEST_WORDS.test(a.name || "")),
+        blurb: stripHtml(a.description),
+        dueLabel: `${date} ${time}`,
+      };
+    });
+
+    // Ask the model to name/present them, in batches so one long response can't
+    // get truncated. Any failure just falls through to plain formatting.
+    const ai = new Map();
+    for (let i = 0; i < fresh.length; i += 8) {
+      const batch = fresh.slice(i, i + 8);
+      try {
+        const got = await formatWithAI(batch);
+        if (got) for (const [j, v] of got) if (batch[j]) ai.set(fresh[i + j], v);
+      } catch { /* keep going with fallback formatting */ }
+    }
+
+    let added = 0;
+    for (const item of fresh) {
+      const { course, a, dueMs, date, time, overdue, soon, isTest } = item;
+      const key = String(a.id);
+      const smart = ai.get(item) || {};
 
       const bits = [shortCourse(course)];
       if (isTest) bits.push("Test/Quiz");
       if (a.points_possible) bits.push(`${a.points_possible} pts`);
       if (overdue) bits.push("OVERDUE");
+      const fallbackDesc = bits.join(" · ");
 
       const id = db.collection("_").doc().id; // random id, same shape as the app's
       await tasksRef.doc(id).set({
         id,
-        text: a.name || "Canvas assignment",
+        text: smart.title || a.name || "Canvas assignment",
         done: false,
-        category: overdue ? "Urgent" : "Work",
-        priority: overdue || isTest || soon ? "high" : "medium",
+        category: smart.category || (overdue ? "Urgent" : "Work"),
+        priority: smart.priority || (overdue || isTest || soon ? "high" : "medium"),
         dueDate: date,
         dueTime: time,
-        description: `${bits.join(" · ")}\n${a.html_url || ""}`.trim(),
+        // Canvas link is always appended so the task stays traceable to the source.
+        description: `${smart.description || fallbackDesc}\n${a.html_url || ""}`.trim(),
         // Past-due reminders are ignored by send-reminders' 1-hour window, so
         // importing old work won't spam notifications.
         remindAt: dueMs,
@@ -152,7 +243,9 @@ export default async function handler(req, res) {
       added++;
     }
 
-    return res.status(200).json({ ok: true, courses: courses.length, pending: pending.length, added });
+    return res.status(200).json({
+      ok: true, courses: courses.length, pending: pending.length, added, aiNamed: ai.size,
+    });
   } catch (err) {
     return res.status(500).json({ error: "sync_failed", detail: String(err) });
   }
