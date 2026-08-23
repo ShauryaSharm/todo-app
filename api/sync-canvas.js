@@ -77,7 +77,7 @@ const CATEGORIES = ["Work", "Personal", "Shopping", "Health", "Urgent", "Other"]
 // formatting if the model is unavailable — the sync must never depend on it.
 async function formatWithAI(batch) {
   const key = (process.env.GROQ_API_KEY || "").trim();
-  if (!key) return null;
+  if (!key) throw new Error("GROQ_API_KEY missing in this function's env");
 
   const lines = batch.map((b, i) =>
     `${i}. name="${b.a.name || ""}" | course="${shortCourse(b.course)}" | ` +
@@ -113,7 +113,7 @@ async function formatWithAI(batch) {
       }, { role: "user", content: lines }],
     }),
   });
-  if (!res.ok) return null;
+  if (!res.ok) throw new Error(`Groq ${res.status}: ${(await res.text()).slice(0, 200)}`);
   const data = await res.json();
   const parsed = JSON.parse(data.choices?.[0]?.message?.content || "{}");
   const out = new Map();
@@ -210,12 +210,16 @@ export default async function handler(req, res) {
     // Ask the model to name/present them, in batches so one long response can't
     // get truncated. Any failure just falls through to plain formatting.
     const ai = new Map();
+    let aiError = null;
     for (let i = 0; i < fresh.length; i += 8) {
       const batch = fresh.slice(i, i + 8);
       try {
         const got = await formatWithAI(batch);
         if (got) for (const [j, v] of got) if (batch[j]) ai.set(fresh[i + j], v);
-      } catch { /* keep going with fallback formatting */ }
+      } catch (e) {
+        // keep going with fallback formatting, but report why it fell back
+        if (!aiError) aiError = String(e && e.message ? e.message : e).slice(0, 300);
+      }
     }
 
     let added = 0;
@@ -262,6 +266,7 @@ export default async function handler(req, res) {
       pending: pending.length,
       added,
       aiNamed: ai.size,
+      aiError,
       cleared,
       overdue: fresh.filter((f) => f.overdue).length,
       upcoming: fresh.filter((f) => !f.overdue).length,
