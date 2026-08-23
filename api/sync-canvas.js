@@ -175,8 +175,20 @@ export default async function handler(req, res) {
     }
 
     // Dedupe against everything we've ever synced, so deleting a task in the app
-    // doesn't cause it to reappear on the next run.
-    const seenSnap = await db.collection("users").doc(uid).collection("canvasSynced").get();
+    // doesn't cause it to reappear on the next run. ?reset=1 wipes that memory so
+    // previously-imported (and since-deleted) work gets pulled in fresh.
+    const syncedRef = db.collection("users").doc(uid).collection("canvasSynced");
+    let cleared = 0;
+    if (req.query.reset === "1") {
+      const old = await syncedRef.get();
+      for (let i = 0; i < old.docs.length; i += 400) {
+        const batch = db.batch();
+        old.docs.slice(i, i + 400).forEach((d) => batch.delete(d.ref));
+        await batch.commit();
+      }
+      cleared = old.docs.length;
+    }
+    const seenSnap = cleared ? { docs: [] } : await syncedRef.get();
     const seen = new Set(seenSnap.docs.map((d) => d.id));
 
     const tasksRef = db.collection("users").doc(uid).collection("tasks");
@@ -244,7 +256,14 @@ export default async function handler(req, res) {
     }
 
     return res.status(200).json({
-      ok: true, courses: courses.length, pending: pending.length, added, aiNamed: ai.size,
+      ok: true,
+      courses: courses.length,
+      pending: pending.length,
+      added,
+      aiNamed: ai.size,
+      cleared,
+      overdue: fresh.filter((f) => f.overdue).length,
+      upcoming: fresh.filter((f) => !f.overdue).length,
     });
   } catch (err) {
     return res.status(500).json({ error: "sync_failed", detail: String(err) });
