@@ -1,5 +1,9 @@
 import admin from "firebase-admin";
 
+// Groq retires models periodically; set GROQ_MODEL in Vercel to swap without a code change.
+const MODEL = (process.env.GROQ_MODEL || "llama-3.3-70b-versatile").trim();
+
+
 // Canvas pagination plus the AI naming pass can run past Vercel's 10s default.
 export const maxDuration = 60;
 
@@ -90,7 +94,7 @@ async function formatWithAI(batch) {
     method: "POST",
     headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
     body: JSON.stringify({
-      model: "llama-3.1-8b-instant",
+      model: MODEL,
       temperature: 0.3,
       max_tokens: 1200,
       response_format: { type: "json_object" },
@@ -178,15 +182,26 @@ export default async function handler(req, res) {
     // doesn't cause it to reappear on the next run. ?reset=1 wipes that memory so
     // previously-imported (and since-deleted) work gets pulled in fresh.
     const syncedRef = db.collection("users").doc(uid).collection("canvasSynced");
-    let cleared = 0;
+    let cleared = 0, removedTasks = 0;
     // Accept either a header or a query param — some shells mangle query strings.
     if (req.query.reset === "1" || req.headers["x-canvas-reset"] === "1") {
+      const del = async (refs) => {
+        for (let i = 0; i < refs.length; i += 400) {
+          const batch = db.batch();
+          refs.slice(i, i + 400).forEach((r) => batch.delete(r));
+          await batch.commit();
+        }
+      };
+      // Also delete the tasks this sync previously created. Clearing only the dedupe
+      // memory re-imports everything on top of the existing copies, so each reset would
+      // duplicate the whole list. Hand-written tasks (no canvasId) are left alone.
+      const allTasks = await db.collection("users").doc(uid).collection("tasks").get();
+      const canvasTasks = allTasks.docs.filter((d) => d.data().canvasId);
+      await del(canvasTasks.map((d) => d.ref));
+      removedTasks = canvasTasks.length;
+
       const old = await syncedRef.get();
-      for (let i = 0; i < old.docs.length; i += 400) {
-        const batch = db.batch();
-        old.docs.slice(i, i + 400).forEach((d) => batch.delete(d.ref));
-        await batch.commit();
-      }
+      await del(old.docs.map((d) => d.ref));
       cleared = old.docs.length;
     }
     const seenSnap = cleared ? { docs: [] } : await syncedRef.get();
@@ -268,6 +283,7 @@ export default async function handler(req, res) {
       aiNamed: ai.size,
       aiError,
       cleared,
+      removedTasks,
       overdue: fresh.filter((f) => f.overdue).length,
       upcoming: fresh.filter((f) => !f.overdue).length,
     });

@@ -1,3 +1,6 @@
+// Groq retires models periodically; set GROQ_MODEL in Vercel to swap without a code change.
+const MODEL = (process.env.GROQ_MODEL || "llama-3.3-70b-versatile").trim();
+
 const ALLOWED_ORIGIN = "https://shauryasharm.github.io";
 
 export default async function handler(req, res) {
@@ -34,7 +37,7 @@ export default async function handler(req, res) {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "llama-3.1-8b-instant",
+        model: MODEL,
         temperature: 0.4,
         max_tokens: 300,
         response_format: { type: "json_object" },
