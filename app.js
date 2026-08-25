@@ -595,8 +595,15 @@ function nextOccurrence(dateStr, repeat) {
 // Completing a repeating task spawns the next one, leaving the finished copy in Done
 // so history (and the streak of checking it off) is preserved.
 function spawnNextOccurrence(task) {
-  const next = nextOccurrence(task.dueDate, task.repeat);
+  let next = nextOccurrence(task.dueDate, task.repeat);
   if (!next) return;
+  // Catch up if the task had gone stale: a daily one last due a week ago would
+  // otherwise advance a single day per completion and still land in the past.
+  for (let guard = 0; next < todayStr() && guard < 400; guard++) {
+    const after = nextOccurrence(next, task.repeat);
+    if (!after || after === next) break;
+    next = after;
+  }
   const clone = {
     ...task,
     id: uid(),
