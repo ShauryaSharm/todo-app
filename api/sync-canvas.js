@@ -232,7 +232,7 @@ export default async function handler(req, res) {
     }
     duplicatesRemoved = duplicateRefs.length;
 
-    let updated = 0, completed = 0;
+    let updated = 0, completed = 0, reopened = 0;
 
     // 1. Anything turned in on Canvas gets checked off here (if it isn't already).
     for (const { a } of submitted) {
@@ -250,15 +250,28 @@ export default async function handler(req, res) {
       if (!hit) continue;
       const { date, time } = localParts(a.due_at);
       const t = hit.task;
-      if (t.dueDate === date && t.dueTime === time) continue;   // nothing changed
-      await hit.ref.update({
-        dueDate: date,
-        dueTime: time,
-        remindAt: dueMs,
-        notified: dueMs < now,          // re-arm the reminder for a moved-forward due date
-        updatedAt: Date.now(),
-      });
-      updated++;
+      const patch = {};
+
+      // Canvas still lists this as not turned in, so it shouldn't be sitting in Done.
+      // Canvas is the authority on whether its own work is finished; without this a
+      // task checked off by mistake can never come back, since the sync also won't
+      // re-add it.
+      if (t.done) {
+        patch.done = false;
+        patch.completedAt = null;
+        reopened++;
+      }
+      if (t.dueDate !== date || t.dueTime !== time) {
+        patch.dueDate = date;
+        patch.dueTime = time;
+        patch.remindAt = dueMs;
+        patch.notified = dueMs < now;   // re-arm the reminder for a moved due date
+        updated++;
+      }
+
+      if (!Object.keys(patch).length) continue;   // nothing changed
+      patch.updatedAt = Date.now();
+      await hit.ref.update(patch);
     }
 
     // 3. Genuinely new work: never imported before, and not already on the list.
@@ -338,6 +351,7 @@ export default async function handler(req, res) {
       aiError,
       updated,
       completed,
+      reopened,
       duplicatesRemoved,
       cleared,
       removedTasks,
