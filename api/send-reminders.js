@@ -5,6 +5,27 @@ import webpush from "web-push";
 // doesn't suddenly fire, and a brief scheduler outage doesn't spam old reminders).
 const WINDOW_MS = 60 * 60 * 1000; // 1 hour
 
+// Evening digest: a single "here's tomorrow" push, sent once per day from this hour
+// onward (local time). Override with DIGEST_HOUR; set it to -1 to switch the digest off.
+const DIGEST_HOUR = Number(process.env.DIGEST_HOUR ?? 19);
+const TZ = "America/Los_Angeles";
+
+function localNow() {
+  const p = Object.fromEntries(
+    new Intl.DateTimeFormat("en-CA", {
+      timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", hour12: false,
+    }).formatToParts(new Date()).map((x) => [x.type, x.value])
+  );
+  return { date: `${p.year}-${p.month}-${p.day}`, hour: Number(p.hour === "24" ? 0 : p.hour) };
+}
+
+function addDays(ymd, n) {
+  const [y, m, d] = ymd.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d + n));
+  return dt.toISOString().slice(0, 10);
+}
+
 function initAdmin() {
   if (admin.apps.length) return;
   const stripBOM = (s) => s.replace(/^﻿/, "");
@@ -49,7 +70,7 @@ export default async function handler(req, res) {
     const db = admin.firestore();
     const now = Date.now();
 
-    let sent = 0, cleaned = 0, considered = 0;
+    let sent = 0, cleaned = 0, considered = 0, digests = 0;
 
     // Loop per-user rather than a collectionGroup query, so we only rely on the
     // automatic collection-scope index (a collectionGroup query would require a
@@ -93,9 +114,39 @@ export default async function handler(req, res) {
       await doc.ref.update({ notified: true }).catch(() => {});
       if (delivered) sent++;
       }
+
+      // ---- evening digest: one heads-up about tomorrow, so the night can be planned
+      const { date: todayLocal, hour } = localNow();
+      if (DIGEST_HOUR >= 0 && hour >= DIGEST_HOUR) {
+        const metaRef = userRef.collection("meta").doc("digest");
+        const last = (await metaRef.get()).data()?.lastSent;
+        if (last !== todayLocal) {
+          const tomorrow = addDays(todayLocal, 1);
+          const all = await userRef.collection("tasks").where("dueDate", "==", tomorrow).get();
+          const open = all.docs.map((d) => d.data()).filter((t) => !t.done);
+          if (open.length) {
+            const top = open
+              .sort((a, b) => (a.dueTime || "99:99").localeCompare(b.dueTime || "99:99"))
+              .slice(0, 3).map((t) => t.text).join(" · ");
+            if (!subsSnap) subsSnap = await userRef.collection("pushSubs").get();
+            const payload = JSON.stringify({
+              title: `${open.length} due tomorrow`,
+              body: top + (open.length > 3 ? ` +${open.length - 3} more` : ""),
+              tag: "digest-" + todayLocal,
+              url: "https://shauryasharm.github.io/todo-app/",
+            });
+            for (const subDoc of subsSnap.docs) {
+              try { await webpush.sendNotification(subDoc.data(), payload); digests++; }
+              catch { /* dead subs are cleaned up by the reminder loop above */ }
+            }
+          }
+          // Record it either way, so an empty day doesn't retry every minute.
+          await metaRef.set({ lastSent: todayLocal }, { merge: true });
+        }
+      }
     }
 
-    return res.status(200).json({ ok: true, considered, sent, cleaned });
+    return res.status(200).json({ ok: true, considered, sent, cleaned, digests });
   } catch (err) {
     return res.status(500).json({ error: "send_failed", detail: String(err) });
   }
