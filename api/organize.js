@@ -70,6 +70,9 @@ export default async function handler(req, res) {
               `- "dueDate": the resolved date as "YYYY-MM-DD" using the date reference above. If a time is given but no date, use today's date — never leave dueDate null when dueTime is set. Only null if truly no date or time was mentioned at all.\n` +
               `- "dueTime": "HH:MM" 24-hour, or null if no time mentioned. This is what triggers the reminder notification, so ` +
               `always fill it in whenever a time is stated or clearly implied (e.g. "at 8pm"->"20:00", "wake me at 6:30"->"06:30", "at noon"->"12:00", "tonight"->"20:00", "first thing"->"08:00").\n` +
+              `- "repeat": one of daily, weekdays, weekly, monthly — or null. Set it when the input says the task ` +
+              `recurs ("every day"->daily, "every weekday"/"school days"->weekdays, "every monday"/"weekly"->weekly, ` +
+              `"every month"/"monthly"->monthly). Null for one-off tasks.\n` +
               `- "description": a short, genuinely useful elaboration (1-3 sentences) — sub-steps, things to bring/prepare, or context that makes the task easier to act on. ` +
               `Return an empty string "" if the task is already self-explanatory and nothing would help (e.g. "buy milk", "call mom"). Do not restate the title.`,
           },
@@ -89,8 +92,10 @@ export default async function handler(req, res) {
     const dueTime = /^\d{2}:\d{2}$/.test(parsed.dueTime || "") ? parsed.dueTime : null;
     const title = (typeof parsed.title === "string" && parsed.title.trim()) ? parsed.title.trim() : text;
     const description = (typeof parsed.description === "string") ? parsed.description.trim().slice(0, 400) : "";
+    const repeat = ["daily", "weekdays", "weekly", "monthly"].includes(String(parsed.repeat || "").toLowerCase())
+      ? String(parsed.repeat).toLowerCase() : null;
 
-    return res.status(200).json({ title, category, priority, dueDate, dueTime, description });
+    return res.status(200).json({ title, category, priority, dueDate, dueTime, description, repeat });
   } catch (err) {
     return res.status(200).json({ error: "ai_unavailable", detail: String(err && err.message ? err.message : err).slice(0, 200) });
   }

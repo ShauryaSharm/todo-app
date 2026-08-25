@@ -322,6 +322,13 @@ function renderTask(task) {
       `<span>${formatDue(task.dueDate, task.dueTime)}</span>`;
     meta.appendChild(chip);
   }
+  if (task.repeat && REPEATS[task.repeat]) {
+    const rep = document.createElement("span");
+    rep.className = "chip";
+    rep.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 2l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><path d="M7 22l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>' +
+      `<span>${REPEATS[task.repeat]}</span>`;
+    meta.appendChild(rep);
+  }
   if (task.description) {
     const infoChip = document.createElement("span");
     infoChip.className = "chip chip-info";
@@ -522,6 +529,18 @@ function renderEditor(task) {
     priRow.appendChild(b);
   }
 
+  // repeat row
+  const repRow = document.createElement("div");
+  repRow.className = "editor-row";
+  repRow.innerHTML = '<span class="editor-label">Repeat</span>';
+  for (const [val, label] of [["", "None"], ...Object.entries(REPEATS)]) {
+    const b = document.createElement("button");
+    b.className = "mini-btn" + ((task.repeat || "") === val ? " active" : "");
+    b.textContent = label;
+    b.onclick = () => updateTask(task.id, { repeat: val || null });
+    repRow.appendChild(b);
+  }
+
   // category row
   const catRow = document.createElement("div");
   catRow.className = "editor-row";
@@ -536,7 +555,7 @@ function renderEditor(task) {
 
   wrap.append(head, titleRow);
   if (descRow) wrap.appendChild(descRow);
-  wrap.append(dateRow, timeRow, priRow, catRow);
+  wrap.append(dateRow, timeRow, priRow, repRow, catRow);
   return wrap;
 }
 
@@ -544,6 +563,55 @@ function offsetDate(days) {
   const d = new Date(todayStr() + "T00:00:00");
   d.setDate(d.getDate() + days);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+// ---------- repeating tasks ----------
+const REPEATS = { daily: "Daily", weekdays: "Weekdays", weekly: "Weekly", monthly: "Monthly" };
+
+function ymd(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function nextOccurrence(dateStr, repeat) {
+  if (!dateStr || !REPEATS[repeat]) return null;
+  const d = new Date(dateStr + "T00:00:00");
+  if (repeat === "daily") d.setDate(d.getDate() + 1);
+  else if (repeat === "weekly") d.setDate(d.getDate() + 7);
+  else if (repeat === "monthly") {
+    // setMonth alone overflows: Jan 31 + 1 month becomes "Feb 31" -> Mar 3. Move to the
+    // 1st first, then clamp to the last real day of the target month.
+    const day = d.getDate();
+    d.setDate(1);
+    d.setMonth(d.getMonth() + 1);
+    const lastDay = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+    d.setDate(Math.min(day, lastDay));
+  }
+  else if (repeat === "weekdays") {
+    do { d.setDate(d.getDate() + 1); } while (d.getDay() === 0 || d.getDay() === 6);
+  }
+  return ymd(d);
+}
+
+// Completing a repeating task spawns the next one, leaving the finished copy in Done
+// so history (and the streak of checking it off) is preserved.
+function spawnNextOccurrence(task) {
+  const next = nextOccurrence(task.dueDate, task.repeat);
+  if (!next) return;
+  const clone = {
+    ...task,
+    id: uid(),
+    dueDate: next,
+    done: false,
+    completedAt: null,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  };
+  delete clone.canvasId;          // a repeat is ours, not Canvas's
+  delete clone.canvasCourse;
+  applyRemind(clone);
+  tasks.push(clone);
+  saveLocal();
+  cloud?.push(clone);
 }
 
 // ---------- reminders: derive an absolute timestamp from due date + time ----------
@@ -568,7 +636,7 @@ function addTask(text) {
   const task = {
     id: uid(), text, done: false,
     category: guessCategory(text), priority: "medium",
-    dueDate: null, dueTime: null, description: "",
+    dueDate: null, dueTime: null, description: "", repeat: null,
     createdAt: Date.now(), updatedAt: Date.now(),
   };
   tasks.push(task);
@@ -595,6 +663,7 @@ function toggleTask(id, li) {
   saveLocal();
 
   if (becomingDone && navigator.vibrate) navigator.vibrate([14, 45, 18]); // little double-tap haptic
+  if (becomingDone && task.repeat) spawnNextOccurrence(task);
 
   // Play the check animation on the real element before the list re-renders it away,
   // instead of the task just instantly vanishing. renderLocked holds off any render()
@@ -689,6 +758,11 @@ async function parseWithAI(id, text) {
     task.dueDate = d.dueDate || task.dueDate;
     task.dueTime = d.dueTime || task.dueTime;
     if (typeof d.description === "string") task.description = d.description;
+    if (d.repeat) {
+      task.repeat = d.repeat;
+      // A repeat needs a date to advance from; start it today if none was given.
+      if (!task.dueDate) task.dueDate = todayStr();
+    }
     applyRemind(task);
     task.updatedAt = Date.now();
     persist(task);
@@ -875,13 +949,26 @@ async function initCloudSync(config) {
   const { initializeApp } = await import("https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js");
   const { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } =
     await import("https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js");
-  const { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot } =
-    await import("https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js");
+  const {
+    getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager,
+    collection, doc, setDoc, deleteDoc, onSnapshot,
+  } = await import("https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js");
   const subDoc = (uid, id) => doc(collection(db, "users", uid, "pushSubs"), id);
 
   const app = initializeApp(config);
   const auth = getAuth(app);
-  const db = getFirestore(app);
+
+  // Persist the cache to IndexedDB. Without it Firestore only queues offline writes in
+  // memory, so a task added on flaky wifi is lost if the PWA is killed before it
+  // reconnects — and the next cloud snapshot then overwrites the local copy too.
+  let db;
+  try {
+    db = initializeFirestore(app, {
+      localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
+    });
+  } catch {
+    db = getFirestore(app);   // private browsing / unsupported storage — still works, just online-only
+  }
   const provider = new GoogleAuthProvider();
 
   signinBtn.hidden = false;
