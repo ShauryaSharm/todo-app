@@ -206,10 +206,31 @@ export default async function handler(req, res) {
     // them instead of blindly re-adding.
     const existingSnap = cleared ? { docs: [] } : await tasksRef.get();
     const byCanvasId = new Map();
+    const duplicateRefs = [];
     for (const d of existingSnap.docs) {
       const t = d.data();
-      if (t.canvasId) byCanvasId.set(String(t.canvasId), { ref: d.ref, task: t });
+      if (!t.canvasId) continue;                 // hand-written task, leave alone
+      const k = String(t.canvasId);
+      const prev = byCanvasId.get(k);
+      if (!prev) { byCanvasId.set(k, { ref: d.ref, task: t }); continue; }
+      // Two tasks for the same assignment: keep one, drop the other. Prefer a copy
+      // that's already checked off (don't lose completion), otherwise the oldest.
+      const preferNew =
+        (t.done && !prev.task.done) ||
+        (!!t.done === !!prev.task.done && (t.createdAt || 0) < (prev.task.createdAt || 0));
+      if (preferNew) { duplicateRefs.push(prev.ref); byCanvasId.set(k, { ref: d.ref, task: t }); }
+      else { duplicateRefs.push(d.ref); }
     }
+
+    // Clean up duplicates left behind by earlier runs, so the list self-heals
+    // instead of needing a full reset.
+    let duplicatesRemoved = 0;
+    for (let i = 0; i < duplicateRefs.length; i += 400) {
+      const b = db.batch();
+      duplicateRefs.slice(i, i + 400).forEach((r) => b.delete(r));
+      await b.commit();
+    }
+    duplicatesRemoved = duplicateRefs.length;
 
     let updated = 0, completed = 0;
 
@@ -317,6 +338,7 @@ export default async function handler(req, res) {
       aiError,
       updated,
       completed,
+      duplicatesRemoved,
       cleared,
       removedTasks,
       overdue: fresh.filter((f) => f.overdue).length,
