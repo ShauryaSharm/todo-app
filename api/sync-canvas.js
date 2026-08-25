@@ -252,7 +252,7 @@ export default async function handler(req, res) {
     }
     duplicatesRemoved = duplicateRefs.length;
 
-    let updated = 0, completed = 0, reopened = 0;
+    let updated = 0, completed = 0, reopened = 0, aiError = null;
 
     // 1. Anything turned in on Canvas gets checked off here (if it isn't already).
     for (const { a } of submitted) {
@@ -294,6 +294,44 @@ export default async function handler(req, res) {
       await hit.ref.update(patch);
     }
 
+    // 2b. Backfill AI naming for work imported while the model was down. Only touch
+    //     tasks whose title is still the exact raw Canvas name — if it differs, the AI
+    //     already named it or the user edited it, and neither should be clobbered.
+    const needsName = pending
+      .map((p) => ({ ...p, hit: byCanvasId.get(String(p.a.id)) }))
+      .filter((p) => p.hit && (p.hit.task.text || "") === (p.a.name || ""))
+      .map((p) => ({
+        ...p,
+        overdue: p.dueMs < now,
+        isTest: !!(p.a.quiz_id || (p.a.submission_types || []).includes("online_quiz") || TEST_WORDS.test(p.a.name || "")),
+        blurb: stripHtml(p.a.description),
+        dueLabel: localParts(p.a.due_at).date + " " + localParts(p.a.due_at).time,
+      }));
+
+    let renamed = 0;
+    for (let i = 0; i < needsName.length; i += 8) {
+      const batch = needsName.slice(i, i + 8);
+      try {
+        const got = await formatWithAI(batch);
+        if (!got) continue;
+        for (const [j, v] of got) {
+          const item = batch[j];
+          if (!item || !v || !v.title) continue;
+          const keepUrl = (item.hit.task.description || "").match(/https?:\/\/\S+/);
+          await item.hit.ref.update({
+            text: v.title,
+            category: v.category || item.hit.task.category,
+            priority: v.priority || item.hit.task.priority,
+            description: `${v.description || ""}\n${keepUrl ? keepUrl[0] : ""}`.trim(),
+            updatedAt: Date.now(),
+          });
+          renamed++;
+        }
+      } catch (e) {
+        if (!aiError) aiError = String(e && e.message ? e.message : e).slice(0, 300);
+      }
+    }
+
     // 3. Genuinely new work: never imported before, and not already on the list.
     const fresh = pending
       .filter(({ a }) => !seen.has(String(a.id)) && !byCanvasId.has(String(a.id)))
@@ -312,7 +350,7 @@ export default async function handler(req, res) {
     // Ask the model to name/present them, in batches so one long response can't
     // get truncated. Any failure just falls through to plain formatting.
     const ai = new Map();
-    let aiError = null;
+
     for (let i = 0; i < fresh.length; i += 8) {
       const batch = fresh.slice(i, i + 8);
       try {
@@ -374,6 +412,7 @@ export default async function handler(req, res) {
       completed,
       reopened,
       duplicatesRemoved,
+      renamed,
       skippedCourses,
       cleared,
       removedTasks,
