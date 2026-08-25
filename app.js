@@ -608,9 +608,13 @@ async function parseWithAI(id, text) {
     if (typeof d.description === "string") task.description = d.description;
     applyRemind(task);
     task.updatedAt = Date.now();
-    parsingIds.delete(id);
     persist(task);
   } catch {
+    /* keep the task exactly as typed */
+  } finally {
+    // Must always run: an early return (AI error, task deleted mid-flight) used to
+    // leave the id in parsingIds, so the card shimmered as "thinking" forever and
+    // looked like it never saved.
     parsingIds.delete(id);
     render();
   }
