@@ -12,6 +12,20 @@ const TEST_WORDS = /\b(quiz|test|exam|midterm|final|assessment)\b/i;
 // from earlier in the term don't flood the list.
 const MAX_OVERDUE_MS = 20 * 24 * 60 * 60 * 1000;
 
+// Canvas lists clubs, counseling pages and forums as "courses" even though they carry
+// no real coursework. Matched case-insensitively as substrings of the course name.
+// Set CANVAS_EXCLUDE_COURSES in Vercel (comma-separated) to replace this list.
+const DEFAULT_EXCLUDES = ["student forum", "counseling", "join whs leadership"];
+const EXCLUDES = (() => {
+  const custom = (process.env.CANVAS_EXCLUDE_COURSES || "")
+    .split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
+  return custom.length ? custom : DEFAULT_EXCLUDES;
+})();
+function isExcludedCourse(name) {
+  const l = String(name || "").toLowerCase();
+  return EXCLUDES.some((e) => l.includes(e));
+}
+
 function initAdmin() {
   if (admin.apps.length) return;
   const stripBOM = (s) => s.replace(/^﻿/, "");
@@ -157,7 +171,9 @@ export default async function handler(req, res) {
     const now = Date.now();
     const pending = [];     // still needs doing -> should exist as an open task
     const submitted = [];   // turned in / graded -> matching task should be checked off
+    const skippedCourses = [];
     for (const c of courses) {
+      if (isExcludedCourse(c.name)) { skippedCourses.push(c.name); continue; }
       const assignments = await canvasGetAll(
         `/api/v1/courses/${c.id}/assignments`, { "include[]": "submission" }
       );
@@ -212,6 +228,10 @@ export default async function handler(req, res) {
       if (!t.canvasId) continue;                 // hand-written task, leave alone
       const k = String(t.canvasId);
       const prev = byCanvasId.get(k);
+      // Already-imported work from a course that's since been excluded should go away
+      // too, not linger forever just because it was added before the rule existed.
+      const from = `${t.canvasCourse || ""} ${t.description || ""}`;
+      if (isExcludedCourse(from)) { duplicateRefs.push(d.ref); continue; }
       if (!prev) { byCanvasId.set(k, { ref: d.ref, task: t }); continue; }
       // Two tasks for the same assignment: keep one, drop the other. Prefer a copy
       // that's already checked off (don't lose completion), otherwise the oldest.
@@ -332,6 +352,7 @@ export default async function handler(req, res) {
         remindAt: dueMs,
         notified: overdue,
         canvasId: key,
+        canvasCourse: course || "",
         createdAt: Date.now(),
         updatedAt: Date.now(),
       });
@@ -353,6 +374,7 @@ export default async function handler(req, res) {
       completed,
       reopened,
       duplicatesRemoved,
+      skippedCourses,
       cleared,
       removedTasks,
       overdue: fresh.filter((f) => f.overdue).length,
