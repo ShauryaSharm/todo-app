@@ -1,7 +1,7 @@
 // Model selection lives in lib/groq.js (tries a chain, survives deprecations).
 import { groqChat } from "../lib/groq.js";
 
-const CATEGORIES = ["Work", "Personal", "Shopping", "Health", "Urgent", "Other"];
+const CATEGORIES = ["Homework", "Work", "Personal", "Shopping", "Health", "Urgent", "Other"];
 const PRIORITIES = ["high", "medium", "low"];
 const ALLOWED_ORIGIN = "https://shauryasharm.github.io";
 const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -59,7 +59,9 @@ export default async function handler(req, res) {
               `- "title": the task cleaned of any date/time words AND of reminder/alarm framing like ` +
               `"remind me to", "set an alarm for", "set a reminder to", "notify me to", "alert me to", "wake me up", "ping me to", "don't forget to". ` +
               `E.g. "call mom friday 3pm" -> "Call mom"; "remind me to take medicine at 8pm" -> "Take medicine"; "set an alarm for gym at 6am" -> "Gym". Capitalize the first letter.\n` +
-              `- "category": exactly one of ${CATEGORIES.join(", ")}. Choose the best fit (a doctor/pharmacy/gym task is Health; groceries/buying is Shopping; job/meeting/email is Work).\n` +
+              `- "category": exactly one of ${CATEGORIES.join(", ")}. Choose the best fit: schoolwork — homework, essays, ` +
+              `studying, quizzes/tests, labs, readings, projects for a class — is "Homework"; a doctor/pharmacy/gym task is Health; ` +
+              `groceries/buying is Shopping; a job/meeting/email is Work.\n` +
               `- "priority": one of high, medium, low. Judge this actively for every task — do not default to medium.\n` +
               `  HIGH: explicit urgency words (urgent/asap/critical/emergency), real deadlines with consequences (bills, taxes, work deadlines, exams), health/safety issues, or anything time-sensitive happening very soon.\n` +
               `  LOW: casual/no-pressure items — "someday", "when I get a chance", entertainment, hobbies, minor errands, small chores with no deadline (e.g. "watch that show", "organize bookshelf", "try new recipe").\n` +

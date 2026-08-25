@@ -72,7 +72,7 @@ function stripHtml(s) {
     .replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
 }
 
-const CATEGORIES = ["Work", "Personal", "Shopping", "Health", "Urgent", "Other"];
+const CATEGORIES = ["Homework", "Work", "Personal", "Shopping", "Health", "Urgent", "Other"];
 
 // Let the same model the app uses for quick-add decide how imported Canvas work is
 // named and presented, so it reads like a task the user typed rather than a raw
@@ -103,8 +103,8 @@ async function formatWithAI(batch) {
           `Strip course codes, section numbers, period markers, and bracketed junk. Lead with the subject ` +
           `when it isn't obvious (e.g. "HW 4.2 - Polynomial Long Div (Ch4) [P3]" + course "Algebra 2" -> ` +
           `"Algebra 2 homework: polynomial long division"). Sentence case, no trailing period, under 60 chars.\n` +
-          `- "category": exactly one of ${CATEGORIES.join(", ")}. School work is "Work" unless it's overdue, ` +
-          `in which case "Urgent".\n` +
+          `- "category": exactly one of ${CATEGORIES.join(", ")}. School work is "Homework" unless it's ` +
+          `overdue, in which case "Urgent".\n` +
           `- "priority": high, medium, or low. Tests/quizzes, overdue work, and high point values are high; ` +
           `small routine homework is low; everything else medium.\n` +
           `- "description": one short line of useful context (course, what it is, points). No URLs. ` +
@@ -287,7 +287,7 @@ export default async function handler(req, res) {
         id,
         text: smart.title || a.name || "Canvas assignment",
         done: false,
-        category: smart.category || (overdue ? "Urgent" : "Work"),
+        category: smart.category || (overdue ? "Urgent" : "Homework"),
         priority: smart.priority || (overdue || isTest || soon ? "high" : "medium"),
         dueDate: date,
         dueTime: time,

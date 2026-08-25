@@ -6,6 +6,7 @@ const STORAGE_KEY = "todo-tasks-v1";
 
 const CATEGORY_COLORS = {
   Work: "var(--cat-work)",
+  Homework: "var(--cat-homework)",
   Personal: "var(--cat-personal)",
   Shopping: "var(--cat-shopping)",
   Health: "var(--cat-health)",
@@ -15,6 +16,10 @@ const CATEGORY_COLORS = {
 
 const CATEGORY_KEYWORDS = {
   Urgent: ["urgent", "asap", "important", "overdue", "emergency", "now"],
+  // Checked before Work so school terms win over generic words like "project".
+  Homework: ["homework", "hw", "essay", "assignment", "study", "quiz", "test", "exam",
+    "worksheet", "lab report", "chapter", "read pages", "flashcards", "review packet",
+    "problem set", "due in class", "school", "class"],
   Work: ["meeting", "email", "report", "project", "client", "presentation", "deadline", "boss", "invoice", "work", "slides"],
   Shopping: ["buy", "purchase", "store", "grocery", "groceries", "milk", "shop", "order", "pick up"],
   Health: ["doctor", "dentist", "gym", "workout", "medicine", "prescription", "pharmacy", "appointment", "therapy", "exercise", "run"],
