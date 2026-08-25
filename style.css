@@ -563,6 +563,34 @@ body {
   padding: 0.05rem 0.32rem;
   vertical-align: middle;
 }
+.open-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--cat-color, var(--accent));
+  background: color-mix(in srgb, var(--cat-color, var(--accent)) 14%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--cat-color, var(--accent)) 35%, var(--border));
+  border-radius: 999px;
+  padding: 0.35rem 0.8rem;
+  text-decoration: none;
+  transition: filter 0.15s var(--ease), transform 0.12s var(--ease);
+}
+.open-link:hover { filter: brightness(1.2); transform: translateY(-1px); }
+.open-link:active { transform: scale(0.96); }
+.open-link svg { width: 13px; height: 13px; }
+
+/* swipe-to-act feedback (touch devices) */
+.task-item.swipe-complete {
+  background: color-mix(in srgb, var(--cat-shopping) 26%, var(--surface));
+  border-color: var(--cat-shopping);
+}
+.task-item.swipe-delete {
+  background: color-mix(in srgb, var(--danger) 26%, var(--surface));
+  border-color: var(--danger);
+}
+
 .editor-desc {
   margin: 0;
   font-size: 0.86rem;

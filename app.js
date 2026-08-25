@@ -339,8 +339,54 @@ function renderTask(task) {
   del.onclick = (e) => { e.stopPropagation(); deleteTask(task.id, li); };
 
   li.append(check, body, del);
+  attachSwipe(li, task);
   if (editingId === task.id) li.appendChild(renderEditor(task));
   return li;
+}
+
+// Swipe right to complete, swipe left to delete. Hitting the small circle on a phone
+// is the main daily friction; this makes the whole row the target.
+const SWIPE_TRIGGER = 70;
+function attachSwipe(li, task) {
+  let startX = 0, startY = 0, dx = 0, active = false, decided = false;
+
+  li.addEventListener("touchstart", (e) => {
+    if (editingId === task.id) return;      // don't fight the open editor
+    const t = e.touches[0];
+    startX = t.clientX; startY = t.clientY;
+    dx = 0; active = true; decided = false;
+    li.style.transition = "none";
+  }, { passive: true });
+
+  li.addEventListener("touchmove", (e) => {
+    if (!active) return;
+    const t = e.touches[0];
+    const mx = t.clientX - startX, my = t.clientY - startY;
+    // Only claim the gesture once it's clearly horizontal, so vertical scrolling
+    // through a long list still works normally.
+    if (!decided) {
+      if (Math.abs(mx) < 10 && Math.abs(my) < 10) return;
+      if (Math.abs(my) > Math.abs(mx)) { active = false; return; }
+      decided = true;
+    }
+    dx = mx;
+    li.style.transform = `translateX(${dx}px)`;
+    li.classList.toggle("swipe-complete", dx > SWIPE_TRIGGER);
+    li.classList.toggle("swipe-delete", dx < -SWIPE_TRIGGER);
+  }, { passive: true });
+
+  const end = () => {
+    if (!active) return;
+    active = false;
+    li.style.transition = "";
+    li.style.transform = "";
+    li.classList.remove("swipe-complete", "swipe-delete");
+    if (dx > SWIPE_TRIGGER && !task.done) toggleTask(task.id, li);
+    else if (dx < -SWIPE_TRIGGER) deleteTask(task.id, li);
+    dx = 0;
+  };
+  li.addEventListener("touchend", end, { passive: true });
+  li.addEventListener("touchcancel", () => { active = false; li.style.transition = ""; li.style.transform = ""; li.classList.remove("swipe-complete", "swipe-delete"); }, { passive: true });
 }
 
 function renderEditor(task) {
@@ -381,14 +427,29 @@ function renderEditor(task) {
   titleInput.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); titleInput.blur(); } };
   titleRow.appendChild(titleInput);
 
-  // AI-written description (only shown when there is one)
+  // AI-written description (only shown when there is one). Canvas tasks carry their
+  // assignment URL in here — pull it out so it becomes a real tappable button instead
+  // of an unclickable wall of text.
   let descRow = null;
-  if (task.description) {
+  const url = (task.description || "").match(/https?:\/\/\S+/);
+  const prose = (task.description || "").replace(/https?:\/\/\S+/g, "").trim();
+  if (prose || url) {
     descRow = document.createElement("div");
     descRow.className = "editor-row editor-desc-row";
-    descRow.innerHTML =
-      '<span class="editor-label">Details <span class="ai-tag">AI</span></span>' +
-      `<p class="editor-desc">${escapeHtml(task.description)}</p>`;
+    descRow.innerHTML = prose
+      ? '<span class="editor-label">Details <span class="ai-tag">AI</span></span>' +
+        `<p class="editor-desc">${escapeHtml(prose)}</p>`
+      : "";
+    if (url) {
+      const a = document.createElement("a");
+      a.className = "open-link";
+      a.href = url[0];
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+      a.innerHTML = (task.canvasId ? "Open in Canvas" : "Open link") +
+        ' <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6M10 14L21 3"/></svg>';
+      descRow.appendChild(a);
+    }
   }
 
   // due date row
