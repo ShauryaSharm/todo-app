@@ -375,18 +375,35 @@ function attachSwipe(li, task) {
     li.classList.toggle("swipe-delete", dx < -SWIPE_TRIGGER);
   }, { passive: true });
 
+  const springBack = () => {
+    li.style.transition = "transform 0.28s var(--ease)";
+    li.style.transform = "";
+    li.classList.remove("swipe-complete", "swipe-delete");
+  };
+
+  // Fly the card the rest of the way off in the direction it was thrown, then act.
+  // Acting first (or snapping back to 0 first) made it look like it vanished instantly.
+  const flyOut = (dir, after) => {
+    const dist = (li.offsetWidth || 400) + 40;
+    li.style.transition = "transform 0.22s ease-out, opacity 0.22s ease-out";
+    li.style.transform = `translateX(${dir * dist}px)`;
+    li.style.opacity = "0";
+    // Pass no element to the action so it doesn't try to run its own exit animation
+    // on top of this one.
+    setTimeout(after, 200);
+  };
+
   const end = () => {
     if (!active) return;
     active = false;
-    li.style.transition = "";
-    li.style.transform = "";
-    li.classList.remove("swipe-complete", "swipe-delete");
-    if (dx > SWIPE_TRIGGER && !task.done) toggleTask(task.id, li);
-    else if (dx < -SWIPE_TRIGGER) deleteTask(task.id, li);
+    const thrown = dx;
     dx = 0;
+    if (thrown > SWIPE_TRIGGER && !task.done) flyOut(1, () => toggleTask(task.id, null));
+    else if (thrown < -SWIPE_TRIGGER) flyOut(-1, () => deleteTask(task.id, null));
+    else springBack();          // didn't reach the trigger — ease back into place
   };
   li.addEventListener("touchend", end, { passive: true });
-  li.addEventListener("touchcancel", () => { active = false; li.style.transition = ""; li.style.transform = ""; li.classList.remove("swipe-complete", "swipe-delete"); }, { passive: true });
+  li.addEventListener("touchcancel", () => { active = false; dx = 0; springBack(); }, { passive: true });
 }
 
 function renderEditor(task) {
