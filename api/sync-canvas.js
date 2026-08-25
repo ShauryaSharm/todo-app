@@ -1,7 +1,6 @@
 import admin from "firebase-admin";
 
-// Groq retires models periodically; set GROQ_MODEL in Vercel to swap without a code change.
-const MODEL = (process.env.GROQ_MODEL || "llama-3.3-70b-versatile").trim();
+import { groqChat } from "../lib/groq.js";
 
 
 // Canvas pagination plus the AI naming pass can run past Vercel's 10s default.
@@ -90,11 +89,7 @@ async function formatWithAI(batch) {
     (b.blurb ? ` | details="${b.blurb.slice(0, 200)}"` : "")
   ).join("\n");
 
-  const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: MODEL,
+  const { data } = await groqChat({
       temperature: 0.3,
       max_tokens: 1200,
       response_format: { type: "json_object" },
@@ -115,10 +110,7 @@ async function formatWithAI(batch) {
           `- "description": one short line of useful context (course, what it is, points). No URLs. ` +
           `Don't restate the title.`,
       }, { role: "user", content: lines }],
-    }),
   });
-  if (!res.ok) throw new Error(`Groq ${res.status}: ${(await res.text()).slice(0, 200)}`);
-  const data = await res.json();
   const parsed = JSON.parse(data.choices?.[0]?.message?.content || "{}");
   const out = new Map();
   for (const it of parsed.items || []) {

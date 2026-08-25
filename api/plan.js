@@ -1,5 +1,4 @@
-// Groq retires models periodically; set GROQ_MODEL in Vercel to swap without a code change.
-const MODEL = (process.env.GROQ_MODEL || "llama-3.3-70b-versatile").trim();
+import { groqChat } from "../lib/groq.js";
 
 const ALLOWED_ORIGIN = "https://shauryasharm.github.io";
 
@@ -30,14 +29,7 @@ export default async function handler(req, res) {
     .join("\n");
 
   try {
-    const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${(process.env.GROQ_API_KEY || "").trim()}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: MODEL,
+    const { data } = await groqChat({
         temperature: 0.4,
         max_tokens: 300,
         response_format: { type: "json_object" },
@@ -52,12 +44,8 @@ export default async function handler(req, res) {
           },
           { role: "user", content: list },
         ],
-      }),
     });
 
-    if (!groqRes.ok) throw new Error(`Groq API error: ${groqRes.status}`);
-
-    const data = await groqRes.json();
     const parsed = JSON.parse(data.choices?.[0]?.message?.content || "{}");
     const validIds = new Set(tasks.map((t) => t.id));
     const order = Array.isArray(parsed.order) ? parsed.order.filter((id) => validIds.has(id)) : [];
