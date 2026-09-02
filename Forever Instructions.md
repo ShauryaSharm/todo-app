@@ -69,7 +69,8 @@ All cron endpoints are guarded by `CRON_SECRET`, accepted as header `x-cron-secr
 `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `CRON_SECRET`, `CANVAS_BASE_URL`, `CANVAS_TOKEN`,
 `CANVAS_TARGET_UID`, `CANVAS_EXCLUDE_COURSES` (optional), `DUE_ANCHOR_HOUR` (optional,
 default 17), `QUIET_START`/`QUIET_END` (optional, default 22/7; `QUIET_END=-1` disables
-quiet hours), `ACTION_SECRET` (optional, falls back to `CRON_SECRET`), `PUBLIC_API_BASE`
+quiet hours), `SWEEP_EVERY_MIN` (optional, default 5; 1 disables the gate),
+`ACTION_SECRET` (optional, falls back to `CRON_SECRET`), `PUBLIC_API_BASE`
 (optional), `GOOGLE_CLIENT_ID`,
 `GOOGLE_CLIENT_SECRET`, `GOOGLE_REFRESH_TOKEN`, `GMAIL_LABEL`, `DIGEST_HOUR` (optional,
 default 19, `-1` disables).
@@ -159,12 +160,20 @@ Groq's live model list via `curl https://api.groq.com/openai/v1/models -H "Autho
   walks a chain (currently leading with `openai/gpt-oss-20b`) and stops early on 401/403.
 - **Firestore needs `persistentLocalCache`.** The default memory cache lost offline writes
   when the PWA was killed, and the next cloud snapshot overwrote the local copy.
+- **Signing in must not upload the whole local list.** A merge-write of every local task
+  resurrected anything deleted on another device while this one was closed. `app.js`
+  records `todo-last-cloud-sync` and only uploads tasks changed after it.
 - **Don't let the sync resurrect user checkoffs.** Completions record `completedBy`
   (`"user"` vs `"sync"`); the Canvas sync only re-opens its own. Plenty of schoolwork is
   finished without being submitted on Canvas.
 - **Reset must delete tasks too.** Clearing only the dedupe memory re-imported everything
   on top of existing copies (21 tasks for 7 assignments). Every sync now also collapses
   duplicates sharing a `canvasId`.
+- **Watch Firestore's 50k free daily reads when adding anything to `send-reminders`.**
+  It runs every minute, so a query returning 50 docs costs 72,000 reads/day on its own —
+  over quota, after which reads fail and reminders stop dead. The advance-warning and
+  snooze sweeps are therefore gated to every 5th minute (`SWEEP_EVERY_MIN`), which is
+  free given their 1-hour window. Only the due-time check runs every minute.
 - **Firestore sorts `null` before every number.** A bare `where("snoozedUntil", "<=", now)`
   matches every task that has never been snoozed. Pair it with `where(field, ">", 0)`.
 - **Never build a timestamp with `new Date("YYYY-MM-DDTHH:MM")` on the server.** That

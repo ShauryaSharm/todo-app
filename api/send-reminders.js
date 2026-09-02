@@ -47,6 +47,14 @@ const ANCHOR_HOUR = Number(process.env.DUE_ANCHOR_HOUR ?? 17);
 // morning instead — most schoolwork is due at 23:59, so without this the week-out and
 // day-out warnings would both arrive just before midnight. Set QUIET_END to -1 to
 // deliver at the exact computed time instead.
+// The advance and snooze sweeps read every task due in the next week. At one run a
+// minute that is tens of thousands of document reads a day — a full course load synced
+// from Canvas is enough on its own to exhaust Firestore's free tier, after which reads
+// start failing and reminders stop entirely. Neither sweep needs minute precision, and
+// both tolerate an hour of slack (WINDOW_MS), so they run every fifth minute instead.
+// The due-time reminder below is untouched and still checked every minute.
+const SWEEP_EVERY_MIN = Number(process.env.SWEEP_EVERY_MIN ?? 5);
+
 const QUIET_START = Number(process.env.QUIET_START ?? 22); // 10pm
 const QUIET_END = Number(process.env.QUIET_END ?? 7); // 7am
 
@@ -103,6 +111,9 @@ export default async function handler(req, res) {
 
     const db = admin.firestore();
     const now = Date.now();
+    // Gate the expensive sweeps. Minute-of-hour is used rather than a stored marker so a
+    // missed cron tick simply waits for the next slot instead of needing state.
+    const sweep = SWEEP_EVERY_MIN <= 1 || new Date(now).getUTCMinutes() % SWEEP_EVERY_MIN === 0;
 
     let sent = 0, cleaned = 0, considered = 0, digests = 0, advance = 0, snoozes = 0;
 
@@ -151,98 +162,100 @@ export default async function handler(req, res) {
       }
 
       // ---- advance warnings: a week, a day and six hours before something is due
-      const { date: today } = localNow();
-      // Only tasks whose deadline is close enough for a stage to be live, so this stays
-      // a small read even with a long history. One day of slack past the furthest stage.
-      const upcoming = await userRef.collection("tasks")
-        .where("dueDate", ">=", today)
-        .where("dueDate", "<=", addDays(today, 8))
-        .get();
+      if (sweep) {
+        const { date: today } = localNow();
+        // Only tasks whose deadline is close enough for a stage to be live, so this stays
+        // a small read even with a long history. One day of slack past the furthest stage.
+        const upcoming = await userRef.collection("tasks")
+          .where("dueDate", ">=", today)
+          .where("dueDate", "<=", addDays(today, 8))
+          .get();
 
-      for (const doc of upcoming.docs) {
-        const task = doc.data();
-        if (task.done) continue;
-        const dueAt = dueAtOf(task);
-        if (!dueAt) continue;
+        for (const doc of upcoming.docs) {
+          const task = doc.data();
+          if (task.done) continue;
+          const dueAt = dueAtOf(task);
+          if (!dueAt) continue;
 
-        const already = Array.isArray(task.notifiedStages) ? task.notifiedStages : [];
-        const ripe = STAGES.filter((st) => {
-          if (already.includes(st.key)) return false;
-          const at = deliverAt(dueAt, st.lead);
-          return at !== null && now >= at && now < at + WINDOW_MS;
-        });
-        if (!ripe.length) continue;
+          const already = Array.isArray(task.notifiedStages) ? task.notifiedStages : [];
+          const ripe = STAGES.filter((st) => {
+            if (already.includes(st.key)) return false;
+            const at = deliverAt(dueAt, st.lead);
+            return at !== null && now >= at && now < at + WINDOW_MS;
+          });
+          if (!ripe.length) continue;
 
-        // If a task is created late, several stages can come due together. Send only the
-        // most urgent, but record them all so the earlier ones don't fire afterwards.
-        const stage = ripe[ripe.length - 1];
-        considered++;
+          // If a task is created late, several stages can come due together. Send only the
+          // most urgent, but record them all so the earlier ones don't fire afterwards.
+          const stage = ripe[ripe.length - 1];
+          considered++;
 
-        if (!subsSnap) subsSnap = await userRef.collection("pushSubs").get();
-        const payload = JSON.stringify({
-          title: titleFor(dueAt - now),
-          body: task.text || "You have a task coming up.",
-          tag: `${doc.id}-${stage.key}`,
-          url: "https://shauryasharm.github.io/todo-app/",
-          ...actionBits(uid, doc.id, task),
-        });
-        let delivered = 0;
-        for (const subDoc of subsSnap.docs) {
-          try { await webpush.sendNotification(subDoc.data(), payload); delivered++; }
-          catch (err) {
-            if (err.statusCode === 404 || err.statusCode === 410) {
-              await subDoc.ref.delete().catch(() => {});
-              cleaned++;
+          if (!subsSnap) subsSnap = await userRef.collection("pushSubs").get();
+          const payload = JSON.stringify({
+            title: titleFor(dueAt - now),
+            body: task.text || "You have a task coming up.",
+            tag: `${doc.id}-${stage.key}`,
+            url: "https://shauryasharm.github.io/todo-app/",
+            ...actionBits(uid, doc.id, task),
+          });
+          let delivered = 0;
+          for (const subDoc of subsSnap.docs) {
+            try { await webpush.sendNotification(subDoc.data(), payload); delivered++; }
+            catch (err) {
+              if (err.statusCode === 404 || err.statusCode === 410) {
+                await subDoc.ref.delete().catch(() => {});
+                cleaned++;
+              }
             }
           }
+          // Record even when nothing was delivered, so a phone that was offline doesn't
+          // collect a week of backdated warnings the moment it reconnects.
+          await doc.ref.update({
+            notifiedStages: admin.firestore.FieldValue.arrayUnion(...ripe.map((r) => r.key)),
+          }).catch(() => {});
+          if (delivered) advance++;
         }
-        // Record even when nothing was delivered, so a phone that was offline doesn't
-        // collect a week of backdated warnings the moment it reconnects.
-        await doc.ref.update({
-          notifiedStages: admin.firestore.FieldValue.arrayUnion(...ripe.map((r) => r.key)),
-        }).catch(() => {});
-        if (delivered) advance++;
-      }
 
-      // ---- snoozed reminders coming back round
-      // The lower bound matters: Firestore sorts null before every number, so a bare
-      // "<= now" would match every task that has never been snoozed.
-      const snoozed = await userRef.collection("tasks")
-        .where("snoozedUntil", ">", 0)
-        .where("snoozedUntil", "<=", now)
-        .get();
+        // ---- snoozed reminders coming back round
+        // The lower bound matters: Firestore sorts null before every number, so a bare
+        // "<= now" would match every task that has never been snoozed.
+        const snoozed = await userRef.collection("tasks")
+          .where("snoozedUntil", ">", 0)
+          .where("snoozedUntil", "<=", now)
+          .get();
 
-      for (const doc of snoozed.docs) {
-        const task = doc.data();
-        // Clear it either way — a task finished during the snooze shouldn't resurface.
-        if (task.done) {
-          await doc.ref.update({ snoozedUntil: null }).catch(() => {});
-          continue;
-        }
-        considered++;
-        const dueAt = dueAtOf(task);
-        if (!subsSnap) subsSnap = await userRef.collection("pushSubs").get();
-        const payload = JSON.stringify({
-          title: dueAt ? titleFor(dueAt - now) : "Reminder",
-          body: task.text || "You asked to be reminded again.",
-          tag: `${doc.id}-snooze`,
-          url: "https://shauryasharm.github.io/todo-app/",
-          ...actionBits(uid, doc.id, task),
-        });
-        let delivered = 0;
-        for (const subDoc of subsSnap.docs) {
-          try { await webpush.sendNotification(subDoc.data(), payload); delivered++; }
-          catch (err) {
-            if (err.statusCode === 404 || err.statusCode === 410) {
-              await subDoc.ref.delete().catch(() => {});
-              cleaned++;
+        for (const doc of snoozed.docs) {
+          const task = doc.data();
+          // Clear it either way — a task finished during the snooze shouldn't resurface.
+          if (task.done) {
+            await doc.ref.update({ snoozedUntil: null }).catch(() => {});
+            continue;
+          }
+          considered++;
+          const dueAt = dueAtOf(task);
+          if (!subsSnap) subsSnap = await userRef.collection("pushSubs").get();
+          const payload = JSON.stringify({
+            title: dueAt ? titleFor(dueAt - now) : "Reminder",
+            body: task.text || "You asked to be reminded again.",
+            tag: `${doc.id}-snooze`,
+            url: "https://shauryasharm.github.io/todo-app/",
+            ...actionBits(uid, doc.id, task),
+          });
+          let delivered = 0;
+          for (const subDoc of subsSnap.docs) {
+            try { await webpush.sendNotification(subDoc.data(), payload); delivered++; }
+            catch (err) {
+              if (err.statusCode === 404 || err.statusCode === 410) {
+                await subDoc.ref.delete().catch(() => {});
+                cleaned++;
+              }
             }
           }
+          // Clear regardless of delivery, otherwise a phone that was off would collect a
+          // pile of identical snoozes the moment it comes back.
+          await doc.ref.update({ snoozedUntil: null, updatedAt: Date.now() }).catch(() => {});
+          if (delivered) snoozes++;
         }
-        // Clear regardless of delivery, otherwise a phone that was off would collect a
-        // pile of identical snoozes the moment it comes back.
-        await doc.ref.update({ snoozedUntil: null, updatedAt: Date.now() }).catch(() => {});
-        if (delivered) snoozes++;
       }
 
       // ---- evening digest: one heads-up about tomorrow, so the night can be planned
@@ -276,7 +289,7 @@ export default async function handler(req, res) {
       }
     }
 
-    return res.status(200).json({ ok: true, considered, sent, advance, snoozes, cleaned, digests });
+    return res.status(200).json({ ok: true, sweep, considered, sent, advance, snoozes, cleaned, digests });
   } catch (err) {
     return res.status(500).json({ error: "send_failed", detail: String(err) });
   }
