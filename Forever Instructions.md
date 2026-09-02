@@ -53,7 +53,10 @@ screens, syncs across devices, pulls in schoolwork from Canvas, and sends push r
   expiring token naming one task (`lib/action-token.js`), because the service worker
   runs with the app closed and no signed-in user. CORS-limited to the Pages origin.
 - `/api/sync-gmail` — cron target, hourly. Gmail label(s) → tasks, AI decides what's
-  actionable. `GMAIL_LABEL` accepts one label or a comma-separated list; multiple labels
+  actionable. Two diagnostic modes, both leaving the data alone: `&inspect=1` lists what
+  past runs decided (including the "not a task" verdicts, the only way to tell whether the
+  prompt is too strict), `&dry=1` triages unseen mail and reports what it *would* create
+  without writing or marking anything examined. `GMAIL_LABEL` accepts one label or a comma-separated list; multiple labels
   are OR'd via Gmail's `{...}` brace syntax. Read-only scope, last 14 days, 25 messages a
   run. Every message examined is recorded in `gmailSynced` — including "not a task"
   verdicts — so nothing is re-triaged and deleted tasks don't come back.

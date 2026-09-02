@@ -139,6 +139,25 @@ export default async function handler(req, res) {
       uid = users[0].id;
     }
 
+    // ?inspect=1 — what have previous runs actually decided? Every message examined is
+    // recorded, including the ones judged "not a task", so this is the only way to see
+    // whether the triage is being too strict or too loose. Reads only; writes nothing.
+    if (req.query.inspect) {
+      const rows = (await db.collection("users").doc(uid).collection("gmailSynced").get())
+        .docs.map((d) => ({ id: d.id, ...d.data() }))
+        .sort((a, b) => (b.seenAt || 0) - (a.seenAt || 0));
+      return res.status(200).json({
+        ok: true,
+        examined: rows.length,
+        madeTasks: rows.filter((r) => r.madeTask).length,
+        verdicts: rows.slice(0, 60).map((r) => ({
+          madeTask: !!r.madeTask,
+          subject: r.subject || "(no subject)",
+          seenAt: r.seenAt ? new Date(r.seenAt).toISOString() : null,
+        })),
+      });
+    }
+
     const token = await getAccessToken();
     // Gmail ORs the terms inside {braces}; a single label needs no braces.
     const labelExpr = labels.map((l) => `label:"${l}"`).join(" ");
@@ -165,6 +184,24 @@ export default async function handler(req, res) {
     }
 
     const today = todayLocal();
+
+    // ?dry=1 — triage the unseen mail and report the verdicts without creating a task or
+    // marking anything examined, so the prompt can be judged before it writes.
+    if (req.query.dry) {
+      const out = [];
+      for (let i = 0; i < emails.length; i += 8) {
+        const batch = emails.slice(i, i + 8);
+        const verdicts = await triage(batch, today);
+        batch.forEach((e, j) => out.push({
+          subject: e.subject, from: e.from, verdict: verdicts.get(j) || null,
+        }));
+      }
+      return res.status(200).json({
+        ok: true, dry: true, labels, examined: out.length,
+        wouldAdd: out.filter((o) => o.verdict).length, results: out,
+      });
+    }
+
     const tasksRef = db.collection("users").doc(uid).collection("tasks");
     let added = 0;
 
