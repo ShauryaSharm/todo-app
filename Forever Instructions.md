@@ -34,10 +34,12 @@ screens, syncs across devices, pulls in schoolwork from Canvas, and sends push r
 | Date/zone math | `lib/localtime.js` | local↔UTC, shared by every function |
 | Firebase init | `lib/firebase-admin.js` | one copy; the env var is a lossy channel |
 | Action tokens | `lib/action-token.js` | signs notification Done/Snooze buttons |
+| Google auth | `lib/google-oauth.js` | one refresh token for Gmail + Calendar |
 | Schedulers | **cron-job.org** | not GitHub Actions (see gotchas) |
 
 **Firestore layout** (all under `users/{uid}/`): `tasks/{taskId}`, `pushSubs/{subId}`,
-`canvasSynced/{canvasAssignmentId}`, `gmailSynced/{messageId}`, `meta/digest`.
+`canvasSynced/{canvasAssignmentId}`, `gmailSynced/{messageId}`,
+`calendarSynced/{eventId}`, `meta/digest`, `meta/calendar` (holds `calendarId`).
 
 ### Endpoints
 - `POST /api/organize` — natural-language quick-add. Returns title, category, priority,
@@ -52,6 +54,12 @@ screens, syncs across devices, pulls in schoolwork from Canvas, and sends push r
   Done or Snooze button is tapped. Not cron-guarded: it authenticates with a signed,
   expiring token naming one task (`lib/action-token.js`), because the service worker
   runs with the app closed and no signed-in user. CORS-limited to the Pages origin.
+- `/api/sync-calendar` — cron target, hourly. Two directions. **Push:** every open dated
+  task becomes an event on a separate Google calendar named "To Do" that the app creates
+  and owns; finishing a task deletes its event. **Pull:** events on the *real* calendars
+  are AI-triaged into tasks — strictly, since a calendar is mostly schedule rather than
+  work ("an event you just show up to is not a task"). Same `&inspect=1` / `&dry=1` modes
+  as the Gmail sync, plus `&pushonly=1` to skip the read half.
 - `/api/sync-gmail` — cron target, hourly. Gmail label(s) → tasks, AI decides what's
   actionable. Two diagnostic modes, both leaving the data alone: `&inspect=1` lists what
   past runs decided (including the "not a task" verdicts, the only way to tell whether the
@@ -70,7 +78,8 @@ All cron endpoints are guarded by `CRON_SECRET`, accepted as header `x-cron-secr
 `CANVAS_TARGET_UID`, `CANVAS_EXCLUDE_COURSES` (optional), `DUE_ANCHOR_HOUR` (optional,
 default 17), `QUIET_START`/`QUIET_END` (optional, default 22/7; `QUIET_END=-1` disables
 quiet hours), `SWEEP_EVERY_MIN` (optional, default 5; 1 disables the gate),
-`ACTION_SECRET` (optional, falls back to `CRON_SECRET`), `PUBLIC_API_BASE`
+`CALENDAR_NAME` (optional, default "To Do"), `CALENDAR_PULL_DAYS` (optional, default
+30), `ACTION_SECRET` (optional, falls back to `CRON_SECRET`), `PUBLIC_API_BASE`
 (optional), `GOOGLE_CLIENT_ID`,
 `GOOGLE_CLIENT_SECRET`, `GOOGLE_REFRESH_TOKEN`, `GMAIL_LABEL`, `DIGEST_HOUR` (optional,
 default 19, `-1` disables).
@@ -173,6 +182,14 @@ Groq's live model list via `curl https://api.groq.com/openai/v1/models -H "Autho
 - **Reset must delete tasks too.** Clearing only the dedupe memory re-imported everything
   on top of existing copies (21 tasks for 7 assignments). Every sync now also collapses
   duplicates sharing a `canvasId`.
+- **All Google scopes must be minted in one authorization.** A refresh token carries only
+  the scopes ticked when it was created, so re-authorizing for Calendar alone silently
+  kills the Gmail sync. The full set is `gmail.readonly`, `calendar.readonly` and
+  `calendar.app.created` — the last of which grants access *only* to calendars this app
+  itself created, so it can never modify or delete anything on the real calendars.
+- **The calendar sync must never read its own calendar.** Its own pushed events would be
+  triaged straight back into tasks, which would be pushed back as events. `sync-calendar.js`
+  skips `calId` when listing.
 - **Watch Firestore's 50k free daily reads when adding anything to `send-reminders`.**
   It runs every minute, so a query returning 50 docs costs 72,000 reads/day on its own —
   over quota, after which reads fail and reminders stop dead. The advance-warning and

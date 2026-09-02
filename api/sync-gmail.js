@@ -1,6 +1,7 @@
 import admin from "firebase-admin";
 import { groqChat } from "../lib/groq.js";
 import { zonedToEpochMs } from "../lib/localtime.js";
+import { getAccessToken } from "../lib/google-oauth.js";
 import { initAdmin } from "../lib/firebase-admin.js";
 
 // Token exchange + per-message AI triage can run past Vercel's 10s default.
@@ -10,40 +11,6 @@ const TZ = "America/Los_Angeles";
 const LOOKBACK = process.env.GMAIL_LOOKBACK || "14d";  // don't import years of history
 const MAX_MESSAGES = 25;
 const CATEGORIES = ["Homework", "Work", "Personal", "Shopping", "Health", "Urgent", "Other"];
-
-// Refresh tokens don't expire; trade one for a short-lived access token each run.
-async function getAccessToken() {
-  const body = new URLSearchParams({
-    client_id: process.env.GOOGLE_CLIENT_ID || "",
-    client_secret: process.env.GOOGLE_CLIENT_SECRET || "",
-    refresh_token: process.env.GOOGLE_REFRESH_TOKEN || "",
-    grant_type: "refresh_token",
-  });
-  const res = await fetch("https://oauth2.googleapis.com/token", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body,
-  });
-  const text = await res.text();
-  if (!res.ok) {
-    // While the OAuth app sits in "Testing", Google expires the refresh token after 7
-    // days and every later refresh comes back invalid_grant. That reads like a generic
-    // auth failure, so say plainly what it is and how to fix it — otherwise the sync
-    // just stops producing tasks and nothing explains why.
-    if (text.includes("invalid_grant")) {
-      throw new Error(
-        "GOOGLE_REFRESH_TOKEN is dead (invalid_grant). If the OAuth app is still in " +
-        "Testing status, Google expires the token after 7 days: mint a new one in the " +
-        "OAuth playground and update the Vercel env var. Publishing the app to " +
-        "production stops the expiry for good."
-      );
-    }
-    throw new Error(`google token ${res.status}: ${text.slice(0, 200)}`);
-  }
-  const tok = JSON.parse(text).access_token;
-  if (!tok) throw new Error("google returned no access_token");
-  return tok;
-}
 
 async function gmail(path, token) {
   const res = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me${path}`, {
