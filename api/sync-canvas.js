@@ -258,7 +258,9 @@ export default async function handler(req, res) {
     for (const { a } of submitted) {
       const hit = byCanvasId.get(String(a.id));
       if (!hit || hit.task.done) continue;
-      await hit.ref.update({ done: true, completedAt: Date.now(), updatedAt: Date.now() });
+      await hit.ref.update({
+        done: true, completedAt: Date.now(), completedBy: "sync", updatedAt: Date.now(),
+      });
       completed++;
     }
 
@@ -272,13 +274,14 @@ export default async function handler(req, res) {
       const t = hit.task;
       const patch = {};
 
-      // Canvas still lists this as not turned in, so it shouldn't be sitting in Done.
-      // Canvas is the authority on whether its own work is finished; without this a
-      // task checked off by mistake can never come back, since the sync also won't
-      // re-add it.
-      if (t.done) {
+      // Only undo a completion this sync made itself. If a person checked it off, that
+      // stands — plenty of work is finished without ever being submitted on Canvas
+      // (handed in on paper, done in class), and resurrecting it every hour is worse
+      // than leaving a stale item done.
+      if (t.done && t.completedBy === "sync") {
         patch.done = false;
         patch.completedAt = null;
+        patch.completedBy = null;
         reopened++;
       }
       if (t.dueDate !== date || t.dueTime !== time) {

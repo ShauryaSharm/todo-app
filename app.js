@@ -666,6 +666,9 @@ function toggleTask(id, li) {
   const becomingDone = !task.done;
   task.done = becomingDone;
   task.completedAt = becomingDone ? Date.now() : null;
+  // Record that a person checked this off, so the Canvas sync won't re-open it just
+  // because the assignment isn't submitted there (paper turn-in, done in class, etc).
+  task.completedBy = becomingDone ? "user" : null;
   task.updatedAt = Date.now();
   saveLocal();
 
