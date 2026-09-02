@@ -119,8 +119,10 @@ export default async function handler(req, res) {
     return res.status(401).json({ error: "unauthorized" });
   }
 
-  const label = process.env.GMAIL_LABEL;
-  if (!label) return res.status(400).json({ error: "set GMAIL_LABEL" });
+  // GMAIL_LABEL takes one label or a comma-separated list ("School, Scouts, Volunteering").
+  // Actionable mail is spread across several of Shaurya's filters, not collected in one.
+  const labels = (process.env.GMAIL_LABEL || "").split(",").map((s) => s.trim()).filter(Boolean);
+  if (!labels.length) return res.status(400).json({ error: "set GMAIL_LABEL" });
 
   try {
     initAdmin();
@@ -134,7 +136,11 @@ export default async function handler(req, res) {
     }
 
     const token = await getAccessToken();
-    const q = encodeURIComponent(`label:"${label}" newer_than:${LOOKBACK}`);
+    // Gmail ORs the terms inside {braces}; a single label needs no braces.
+    const labelExpr = labels.map((l) => `label:"${l}"`).join(" ");
+    const q = encodeURIComponent(
+      `${labels.length > 1 ? `{${labelExpr}}` : labelExpr} newer_than:${LOOKBACK}`
+    );
     const list = await gmail(`/messages?q=${q}&maxResults=${MAX_MESSAGES}`, token);
     const ids = (list.messages || []).map((m) => m.id);
 
@@ -145,7 +151,7 @@ export default async function handler(req, res) {
     const fresh = ids.filter((id) => !seen.has(id));
 
     if (!fresh.length) {
-      return res.status(200).json({ ok: true, label, matched: ids.length, examined: 0, added: 0 });
+      return res.status(200).json({ ok: true, labels, matched: ids.length, examined: 0, added: 0 });
     }
 
     const emails = [];
@@ -193,7 +199,7 @@ export default async function handler(req, res) {
       }
     }
 
-    return res.status(200).json({ ok: true, label, matched: ids.length, examined: emails.length, added });
+    return res.status(200).json({ ok: true, labels, matched: ids.length, examined: emails.length, added });
   } catch (err) {
     return res.status(500).json({ error: "gmail_sync_failed", detail: String(err).slice(0, 300) });
   }
