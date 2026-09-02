@@ -59,6 +59,7 @@ let pushStore = null;              // { saveSub(sub), removeSub(id) } — set wh
 let planOrder = null;              // AI "plan my day" ordering (session only)
 const parsingIds = new Set();      // tasks currently being parsed by AI
 let renderLocked = false;          // true while a checkoff animation is mid-play
+let renderedDay = null;            // the date the visible list was built for
 
 function loadLocal() {
   try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || []; }
@@ -178,6 +179,7 @@ function nextUpcoming() {
 // ---------- render ----------
 function render() {
   if (renderLocked) return; // a checkoff animation is mid-play; don't let a sync echo wipe it out
+  renderedDay = todayStr();
 
   viewBtns.forEach((b) => b.classList.toggle("active", b.dataset.view === view));
   updateCounts();
@@ -736,10 +738,15 @@ function showUndoToast(task) {
   const toast = document.createElement("div");
   toast.className = "toast";
   toast.id = "undoToast";
-  toast.innerHTML = `<span>Deleted “${escapeHtml(task.text.slice(0, 30))}${task.text.length > 30 ? "…" : ""}”</span>`;
+  const label = String(task.text || "task");
+  toast.innerHTML = `<span>Deleted “${escapeHtml(label.slice(0, 30))}${label.length > 30 ? "…" : ""}”</span>`;
   const btn = document.createElement("button");
   btn.textContent = "Undo";
   btn.onclick = () => {
+    // Stamp it as changed now. Sign-in only uploads tasks touched since the last cloud
+    // sync, and an undone deletion still carrying its old timestamp would look stale and
+    // never make it back up.
+    task.updatedAt = Date.now();
     tasks.push(task);
     saveLocal(); render(); cloud?.push(task);
     hideToast();
@@ -869,6 +876,24 @@ planBtn.addEventListener("click", planMyDay);
 clearDone.addEventListener("click", clearCompleted);
 
 render();
+
+// ---------- the day rolling over ----------
+// Which tasks are "today", what counts as overdue and every count badge derive from
+// today's date, read during render. A phone PWA is backgrounded rather than closed, so
+// without this the list still shows yesterday's Today — with yesterday's work not yet
+// red — until something unrelated happens to trigger a render.
+function refreshIfDayChanged() {
+  if (todayStr() === renderedDay) return;
+  planOrder = null;               // an ordering for yesterday means nothing now
+  planNote.textContent = "";
+  render();
+}
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) refreshIfDayChanged();
+});
+window.addEventListener("focus", refreshIfDayChanged);
+// Catches midnight passing while the app is open and in front.
+setInterval(refreshIfDayChanged, 60000);
 
 // ---------- service worker ----------
 if ("serviceWorker" in navigator) {

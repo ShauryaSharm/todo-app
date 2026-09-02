@@ -160,6 +160,10 @@ Groq's live model list via `curl https://api.groq.com/openai/v1/models -H "Autho
   walks a chain (currently leading with `openai/gpt-oss-20b`) and stops early on 401/403.
 - **Firestore needs `persistentLocalCache`.** The default memory cache lost offline writes
   when the PWA was killed, and the next cloud snapshot overwrote the local copy.
+- **Anything derived from "today" needs a re-render when the day rolls over.** The PWA is
+  backgrounded, not closed, so `app.js` re-renders on `visibilitychange`, on `focus`, and
+  on a 60s interval; without it the app shows yesterday's Today, with yesterday's work not
+  yet marked overdue, until some unrelated interaction triggers a render.
 - **Signing in must not upload the whole local list.** A merge-write of every local task
   resurrected anything deleted on another device while this one was closed. `app.js`
   records `todo-last-cloud-sync` and only uploads tasks changed after it.
