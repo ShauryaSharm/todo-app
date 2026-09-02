@@ -1,4 +1,4 @@
-const CACHE_NAME = "todo-shell-v28";
+const CACHE_NAME = "todo-shell-v29";
 const SHELL_FILES = [
   "./",
   "./index.html",
@@ -39,21 +39,62 @@ self.addEventListener("push", (event) => {
     icon: "icons/icon-192.png",
     badge: "icons/icon-192.png",
     tag: data.tag || "todo-reminder",
-    data: { url: data.url || "./" },
+    // Buttons let a reminder be dealt with from the lock screen. iOS renders them only
+    // from 16.4 and even then inconsistently; where they're missing the notification
+    // still opens the app on tap, so this degrades to the old behaviour.
+    actions: Array.isArray(data.actions) ? data.actions.slice(0, 2) : [],
+    data: {
+      url: data.url || "./",
+      token: data.token || null,
+      actionUrl: data.actionUrl || null,
+    },
   };
   event.waitUntil(self.registration.showNotification(title, options));
 });
 
+// Focus an open copy of the app, or launch one.
+function openApp(target) {
+  return clients.matchAll({ type: "window", includeUncontrolled: true }).then((wins) => {
+    for (const w of wins) {
+      if ("focus" in w) return w.focus();
+    }
+    return clients.openWindow ? clients.openWindow(target) : undefined;
+  });
+}
+
 self.addEventListener("notificationclick", (event) => {
+  const info = event.notification.data || {};
+  const act = event.action;
   event.notification.close();
-  const target = (event.notification.data && event.notification.data.url) || "./";
+
+  // Tapping the notification body (no action) just opens the app, as before.
+  if (act !== "done" && act !== "snooze") {
+    event.waitUntil(openApp(info.url || "./"));
+    return;
+  }
+
+  // A button press must not open the app — the whole point is handling it in place.
   event.waitUntil(
-    clients.matchAll({ type: "window", includeUncontrolled: true }).then((wins) => {
-      for (const w of wins) {
-        if ("focus" in w) return w.focus();
-      }
-      return clients.openWindow ? clients.openWindow(target) : undefined;
+    fetch(info.actionUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token: info.token, action: act, minutes: 60 }),
     })
+      .then((r) => {
+        if (r.ok) return;
+        throw new Error("action rejected: " + r.status);
+      })
+      .catch(() =>
+        // Offline, or the token expired. Say so rather than failing silently — a tap
+        // that appears to work but doesn't is worse than no button at all.
+        self.registration.showNotification("Couldn't update that task", {
+          body: "Tap to open the app and do it there.",
+          icon: "icons/icon-192.png",
+          badge: "icons/icon-192.png",
+          tag: (info.tag || "todo") + "-failed",
+          data: { url: info.url || "./" },
+        })
+      )
   );
 });
 

@@ -1,6 +1,7 @@
 import admin from "firebase-admin";
 import { groqChat } from "../lib/groq.js";
 import { zonedToEpochMs } from "../lib/localtime.js";
+import { initAdmin } from "../lib/firebase-admin.js";
 
 // Token exchange + per-message AI triage can run past Vercel's 10s default.
 export const maxDuration = 60;
@@ -9,21 +10,6 @@ const TZ = "America/Los_Angeles";
 const LOOKBACK = process.env.GMAIL_LOOKBACK || "14d";  // don't import years of history
 const MAX_MESSAGES = 25;
 const CATEGORIES = ["Homework", "Work", "Personal", "Shopping", "Health", "Urgent", "Other"];
-
-function initAdmin() {
-  if (admin.apps.length) return;
-  const stripBOM = (s) => s.replace(/^﻿/, "");
-  const raw = stripBOM((process.env.FIREBASE_SERVICE_ACCOUNT || "").trim());
-  const candidates = [raw, `{${raw}}`, () => stripBOM(Buffer.from(raw, "base64").toString("utf8").trim())];
-  let sa, err;
-  for (const c of candidates) {
-    try { sa = JSON.parse(typeof c === "function" ? c() : c); break; }
-    catch (e) { err = err || e; }
-  }
-  if (!sa) throw new Error(`service account unparseable: ${err && err.message}`);
-  if (sa.private_key) sa.private_key = sa.private_key.replace(/\\n/g, "\n");
-  admin.initializeApp({ credential: admin.credential.cert(sa) });
-}
 
 // Refresh tokens don't expire; trade one for a short-lived access token each run.
 async function getAccessToken() {

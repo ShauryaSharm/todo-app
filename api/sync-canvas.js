@@ -1,7 +1,7 @@
 import admin from "firebase-admin";
 
 import { groqChat } from "../lib/groq.js";
-
+import { initAdmin } from "../lib/firebase-admin.js";
 
 // Canvas pagination plus the AI naming pass can run past Vercel's 10s default.
 export const maxDuration = 60;
@@ -24,21 +24,6 @@ const EXCLUDES = (() => {
 function isExcludedCourse(name) {
   const l = String(name || "").toLowerCase();
   return EXCLUDES.some((e) => l.includes(e));
-}
-
-function initAdmin() {
-  if (admin.apps.length) return;
-  const stripBOM = (s) => s.replace(/^﻿/, "");
-  const raw = stripBOM((process.env.FIREBASE_SERVICE_ACCOUNT || "").trim());
-  const candidates = [raw, `{${raw}}`, () => stripBOM(Buffer.from(raw, "base64").toString("utf8").trim())];
-  let sa, err;
-  for (const c of candidates) {
-    try { sa = JSON.parse(typeof c === "function" ? c() : c); break; }
-    catch (e) { err = err || e; }
-  }
-  if (!sa) throw new Error(`service account unparseable: ${err && err.message}`);
-  if (sa.private_key) sa.private_key = sa.private_key.replace(/\\n/g, "\n");
-  admin.initializeApp({ credential: admin.credential.cert(sa) });
 }
 
 // --- Canvas API (token stays server-side) ---

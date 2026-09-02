@@ -32,6 +32,8 @@ screens, syncs across devices, pulls in schoolwork from Canvas, and sends push r
 | Auth + data | Firebase `todo-app-65862` (Spark/free) | Google sign-in, Firestore |
 | AI | Groq | via `lib/groq.js` |
 | Date/zone math | `lib/localtime.js` | local↔UTC, shared by every function |
+| Firebase init | `lib/firebase-admin.js` | one copy; the env var is a lossy channel |
+| Action tokens | `lib/action-token.js` | signs notification Done/Snooze buttons |
 | Schedulers | **cron-job.org** | not GitHub Actions (see gotchas) |
 
 **Firestore layout** (all under `users/{uid}/`): `tasks/{taskId}`, `pushSubs/{subId}`,
@@ -46,6 +48,10 @@ screens, syncs across devices, pulls in schoolwork from Canvas, and sends push r
   advance warnings (a week / a day / six hours before), and the 7pm evening digest
   ("3 due tomorrow").
 - `/api/sync-canvas` — cron target, **hourly**. Canvas → tasks.
+- `/api/task-action` — POST, called by the **service worker** when a notification's
+  Done or Snooze button is tapped. Not cron-guarded: it authenticates with a signed,
+  expiring token naming one task (`lib/action-token.js`), because the service worker
+  runs with the app closed and no signed-in user. CORS-limited to the Pages origin.
 - `/api/sync-gmail` — cron target, hourly. Gmail label(s) → tasks, AI decides what's
   actionable. `GMAIL_LABEL` accepts one label or a comma-separated list; multiple labels
   are OR'd via Gmail's `{...}` brace syntax. Read-only scope, last 14 days, 25 messages a
@@ -60,7 +66,8 @@ All cron endpoints are guarded by `CRON_SECRET`, accepted as header `x-cron-secr
 `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `CRON_SECRET`, `CANVAS_BASE_URL`, `CANVAS_TOKEN`,
 `CANVAS_TARGET_UID`, `CANVAS_EXCLUDE_COURSES` (optional), `DUE_ANCHOR_HOUR` (optional,
 default 17), `QUIET_START`/`QUIET_END` (optional, default 22/7; `QUIET_END=-1` disables
-quiet hours), `GOOGLE_CLIENT_ID`,
+quiet hours), `ACTION_SECRET` (optional, falls back to `CRON_SECRET`), `PUBLIC_API_BASE`
+(optional), `GOOGLE_CLIENT_ID`,
 `GOOGLE_CLIENT_SECRET`, `GOOGLE_REFRESH_TOKEN`, `GMAIL_LABEL`, `DIGEST_HOUR` (optional,
 default 19, `-1` disables).
 
@@ -88,6 +95,14 @@ celebration. Respects `prefers-reduced-motion`.
 
 **AI:** quick-add parses reminder/alarm phrasing ("remind me to X at 8pm"), dates, times,
 category, priority, and recurrence. Plan my day. Canvas/Gmail item naming.
+
+**Notification buttons:** reminders carry **Done** and **Snooze 1h**, handled in `sw.js`
+without opening the app. A repeating task gets Snooze only — completing one has to spawn
+its next occurrence and that logic lives in the client, so a server-side Done would
+quietly break the chain. A failed tap (offline, expired token) raises a "Couldn't update
+that task" notification rather than silently doing nothing. iOS renders action buttons
+only from 16.4 and inconsistently; where they're absent the notification still opens the
+app on tap. Done records `completedBy: "user"`, so the Canvas sync won't undo it.
 
 **Reminders:** web push to installed PWA. Per-task at due time, three advance warnings
 (1 week / 1 day / 6 hours before), and a 7pm digest of tomorrow's work. Which warnings
@@ -147,6 +162,8 @@ Groq's live model list via `curl https://api.groq.com/openai/v1/models -H "Autho
 - **Reset must delete tasks too.** Clearing only the dedupe memory re-imported everything
   on top of existing copies (21 tasks for 7 assignments). Every sync now also collapses
   duplicates sharing a `canvasId`.
+- **Firestore sorts `null` before every number.** A bare `where("snoozedUntil", "<=", now)`
+  matches every task that has never been snoozed. Pair it with `where(field, ">", 0)`.
 - **Never build a timestamp with `new Date("YYYY-MM-DDTHH:MM")` on the server.** That
   resolves against the runtime's zone, and Vercel runs in UTC — a 3pm Pacific deadline
   was stored as 8am Pacific, so Gmail-created reminders fired seven hours early. Use
@@ -210,4 +227,9 @@ live sync is the Vercel function, not these scripts.
   listed as a test user, and the refresh token then expires every 7 days. `sync-gmail.js`
   detects that (`invalid_grant`) and returns an error saying to mint a new token rather
   than failing silently. Retry publishing later — it may just be a console bug.
-- Deliberately not built (judged as clutter for now): search, subtasks, course grouping.
+- Discussed and ranked as next up (2026-09-02): Canvas `points_possible` driving priority
+  so a 100-point essay outranks a 5-point warmup; Google Calendar read-only, cheap now the
+  OAuth plumbing exists but needs re-authorizing for a wider scope; a weekly overdue triage
+  pass; AI time estimates (held back — likely to be wrong often enough to lose trust).
+- Deliberately not built (judged as clutter for now): search, subtasks, course grouping,
+  tags beyond the 7 categories, streaks/gamification, light theme.

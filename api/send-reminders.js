@@ -1,6 +1,12 @@
 import admin from "firebase-admin";
 import webpush from "web-push";
 import { zonedToEpochMs, localNow, localAt, addDays } from "../lib/localtime.js";
+import { initAdmin } from "../lib/firebase-admin.js";
+import { signAction } from "../lib/action-token.js";
+
+// Where the service worker posts a Done/Snooze tap back to.
+const ACTION_URL = (process.env.PUBLIC_API_BASE || "https://todo-app-tan-nine-89.vercel.app")
+  .replace(/\/$/, "") + "/api/task-action";
 
 // How far back to still send a reminder (so a task due 3 hours ago on first setup
 // doesn't suddenly fire, and a brief scheduler outage doesn't spam old reminders).
@@ -23,6 +29,7 @@ export const STAGES = [
 // quiet hours moves it — the day-before warning for an 11:59pm deadline goes out at 7am
 // on the day itself — so a fixed "Due tomorrow" label would be plainly wrong.
 export function titleFor(msLeft) {
+  if (msLeft < 0) return "Overdue";
   const h = Math.round(msLeft / HOUR);
   if (h >= 36) return `Due in ${Math.round(h / 24)} days`;
   if (h >= 20) return "Due tomorrow";
@@ -49,6 +56,15 @@ function inQuietHours(hour) {
                                  : hour >= QUIET_START && hour < QUIET_END;
 }
 
+// Buttons to hang on a notification, so it can be dealt with from the lock screen.
+// Completing a repeating task has to spawn its next occurrence, and that logic lives in
+// the client — so those get Snooze only rather than a Done that quietly breaks the chain.
+function actionBits(uid, taskId, task) {
+  const actions = [{ action: "snooze", title: "Snooze 1h" }];
+  if (!task.repeat) actions.unshift({ action: "done", title: "Done" });
+  return { taskId, token: signAction(uid, taskId), actionUrl: ACTION_URL, actions };
+}
+
 // The instant a task is actually due, or null if it has no date at all.
 export function dueAtOf(task) {
   if (!task.dueDate) return null;
@@ -70,32 +86,6 @@ export function deliverAt(dueAt, lead) {
   return t >= dueAt ? null : t;
 }
 
-function initAdmin() {
-  if (admin.apps.length) return;
-  const stripBOM = (s) => s.replace(/^﻿/, "");
-  const raw = stripBOM((process.env.FIREBASE_SERVICE_ACCOUNT || "").trim());
-
-  // Try, in order: raw JSON; JSON with outer braces re-added (they sometimes get dropped
-  // when pasting); base64-decoded JSON. First one that parses wins.
-  const candidates = [raw, `{${raw}}`, () => stripBOM(Buffer.from(raw, "base64").toString("utf8").trim())];
-  let serviceAccount, jsonErr;
-  for (const c of candidates) {
-    try { serviceAccount = JSON.parse(typeof c === "function" ? c() : c); break; }
-    catch (e) { jsonErr = jsonErr || e; }
-  }
-  if (!serviceAccount) {
-    const codes = [...raw.slice(0, 4)].map((ch) => ch.charCodeAt(0)).join(",");
-    throw new Error(
-      `service account unparseable: jsonError="${jsonErr && jsonErr.message}"; len=${raw.length}; firstCharCodes=[${codes}]; hasPrivateKey=${raw.includes("private_key")}`
-    );
-  }
-  // private_key sometimes arrives with literal "\n" instead of real newlines — repair it
-  if (serviceAccount.private_key) {
-    serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, "\n");
-  }
-  admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
-}
-
 export default async function handler(req, res) {
   // Protect the endpoint: only the scheduler (which knows CRON_SECRET) may trigger it.
   const secret = req.query.secret || req.headers["x-cron-secret"];
@@ -114,7 +104,7 @@ export default async function handler(req, res) {
     const db = admin.firestore();
     const now = Date.now();
 
-    let sent = 0, cleaned = 0, considered = 0, digests = 0, advance = 0;
+    let sent = 0, cleaned = 0, considered = 0, digests = 0, advance = 0, snoozes = 0;
 
     // Loop per-user rather than a collectionGroup query, so we only rely on the
     // automatic collection-scope index (a collectionGroup query would require a
@@ -138,6 +128,7 @@ export default async function handler(req, res) {
         body: task.text || "You have a task due.",
         tag: doc.id,
         url: "https://shauryasharm.github.io/todo-app/",
+        ...actionBits(uid, doc.id, task),
       });
 
       let delivered = 0;
@@ -193,6 +184,7 @@ export default async function handler(req, res) {
           body: task.text || "You have a task coming up.",
           tag: `${doc.id}-${stage.key}`,
           url: "https://shauryasharm.github.io/todo-app/",
+          ...actionBits(uid, doc.id, task),
         });
         let delivered = 0;
         for (const subDoc of subsSnap.docs) {
@@ -210,6 +202,47 @@ export default async function handler(req, res) {
           notifiedStages: admin.firestore.FieldValue.arrayUnion(...ripe.map((r) => r.key)),
         }).catch(() => {});
         if (delivered) advance++;
+      }
+
+      // ---- snoozed reminders coming back round
+      // The lower bound matters: Firestore sorts null before every number, so a bare
+      // "<= now" would match every task that has never been snoozed.
+      const snoozed = await userRef.collection("tasks")
+        .where("snoozedUntil", ">", 0)
+        .where("snoozedUntil", "<=", now)
+        .get();
+
+      for (const doc of snoozed.docs) {
+        const task = doc.data();
+        // Clear it either way — a task finished during the snooze shouldn't resurface.
+        if (task.done) {
+          await doc.ref.update({ snoozedUntil: null }).catch(() => {});
+          continue;
+        }
+        considered++;
+        const dueAt = dueAtOf(task);
+        if (!subsSnap) subsSnap = await userRef.collection("pushSubs").get();
+        const payload = JSON.stringify({
+          title: dueAt ? titleFor(dueAt - now) : "Reminder",
+          body: task.text || "You asked to be reminded again.",
+          tag: `${doc.id}-snooze`,
+          url: "https://shauryasharm.github.io/todo-app/",
+          ...actionBits(uid, doc.id, task),
+        });
+        let delivered = 0;
+        for (const subDoc of subsSnap.docs) {
+          try { await webpush.sendNotification(subDoc.data(), payload); delivered++; }
+          catch (err) {
+            if (err.statusCode === 404 || err.statusCode === 410) {
+              await subDoc.ref.delete().catch(() => {});
+              cleaned++;
+            }
+          }
+        }
+        // Clear regardless of delivery, otherwise a phone that was off would collect a
+        // pile of identical snoozes the moment it comes back.
+        await doc.ref.update({ snoozedUntil: null, updatedAt: Date.now() }).catch(() => {});
+        if (delivered) snoozes++;
       }
 
       // ---- evening digest: one heads-up about tomorrow, so the night can be planned
@@ -243,7 +276,7 @@ export default async function handler(req, res) {
       }
     }
 
-    return res.status(200).json({ ok: true, considered, sent, advance, cleaned, digests });
+    return res.status(200).json({ ok: true, considered, sent, advance, snoozes, cleaned, digests });
   } catch (err) {
     return res.status(500).json({ error: "send_failed", detail: String(err) });
   }
