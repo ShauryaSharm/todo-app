@@ -634,6 +634,9 @@ function applyRemind(task) {
     task.remindAt = null;
   }
   task.notified = false; // re-arm whenever the schedule changes
+  // Same for the week/day/six-hour warnings: pushing a due date out should earn them
+  // again, otherwise a task moved a fortnight later never warns before it lands.
+  task.notifiedStages = [];
 }
 
 // ---------- mutations ----------

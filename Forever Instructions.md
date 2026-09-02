@@ -31,6 +31,7 @@ screens, syncs across devices, pulls in schoolwork from Canvas, and sends push r
 | Serverless API | Vercel `/api/*` | auto-deploys from the same repo on push |
 | Auth + data | Firebase `todo-app-65862` (Spark/free) | Google sign-in, Firestore |
 | AI | Groq | via `lib/groq.js` |
+| Date/zone math | `lib/localtime.js` | local↔UTC, shared by every function |
 | Schedulers | **cron-job.org** | not GitHub Actions (see gotchas) |
 
 **Firestore layout** (all under `users/{uid}/`): `tasks/{taskId}`, `pushSubs/{subId}`,
@@ -41,8 +42,9 @@ screens, syncs across devices, pulls in schoolwork from Canvas, and sends push r
   dueDate, dueTime, description, repeat. Gets a server-built date-reference table so
   relative dates ("friday") resolve correctly instead of the model doing date math.
 - `POST /api/plan` — "Plan my day": orders today's tasks + a short coaching note.
-- `/api/send-reminders` — cron target, **every 1 min**. Sends due-time pushes; also sends
-  the 7pm evening digest ("3 due tomorrow").
+- `/api/send-reminders` — cron target, **every 1 min**. Sends due-time pushes, the three
+  advance warnings (a week / a day / six hours before), and the 7pm evening digest
+  ("3 due tomorrow").
 - `/api/sync-canvas` — cron target, **hourly**. Canvas → tasks.
 - `/api/sync-gmail` — cron target, hourly. Gmail label(s) → tasks, AI decides what's
   actionable. `GMAIL_LABEL` accepts one label or a comma-separated list; multiple labels
@@ -56,7 +58,9 @@ All cron endpoints are guarded by `CRON_SECRET`, accepted as header `x-cron-secr
 ### Vercel env vars
 `GROQ_API_KEY`, `GROQ_MODEL` (optional override), `FIREBASE_SERVICE_ACCOUNT`,
 `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `CRON_SECRET`, `CANVAS_BASE_URL`, `CANVAS_TOKEN`,
-`CANVAS_TARGET_UID`, `CANVAS_EXCLUDE_COURSES` (optional), `GOOGLE_CLIENT_ID`,
+`CANVAS_TARGET_UID`, `CANVAS_EXCLUDE_COURSES` (optional), `DUE_ANCHOR_HOUR` (optional,
+default 17), `QUIET_START`/`QUIET_END` (optional, default 22/7; `QUIET_END=-1` disables
+quiet hours), `GOOGLE_CLIENT_ID`,
 `GOOGLE_CLIENT_SECRET`, `GOOGLE_REFRESH_TOKEN`, `GMAIL_LABEL`, `DIGEST_HOUR` (optional,
 default 19, `-1` disables).
 
@@ -85,8 +89,16 @@ celebration. Respects `prefers-reduced-motion`.
 **AI:** quick-add parses reminder/alarm phrasing ("remind me to X at 8pm"), dates, times,
 category, priority, and recurrence. Plan my day. Canvas/Gmail item naming.
 
-**Reminders:** web push to installed PWA. Per-task at due time + a 7pm digest of
-tomorrow's work.
+**Reminders:** web push to installed PWA. Per-task at due time, three advance warnings
+(1 week / 1 day / 6 hours before), and a 7pm digest of tomorrow's work. Which warnings
+have already gone out is recorded per task in `notifiedStages`; `applyRemind()` clears it
+so moving a due date re-arms them. A task with a date but no time is treated as due at
+`DUE_ANCHOR_HOUR` (5pm) purely for reminder timing. Anything landing between 22:00 and
+07:00 is pushed to 07:00 — most schoolwork is due at 23:59, so without that the week-out
+and day-out warnings would both arrive just before midnight. A warning whose shifted time
+would fall after the deadline is dropped rather than sent late. Notification titles are
+derived from the time actually remaining at delivery ("Due in 17 hours"), never from the
+stage name, because the quiet-hours shift makes a fixed "Due tomorrow" wrong.
 
 **Recurring:** daily / weekdays / weekly / monthly. Completing spawns the next occurrence
 and leaves the finished copy in Done.
@@ -135,6 +147,11 @@ Groq's live model list via `curl https://api.groq.com/openai/v1/models -H "Autho
 - **Reset must delete tasks too.** Clearing only the dedupe memory re-imported everything
   on top of existing copies (21 tasks for 7 assignments). Every sync now also collapses
   duplicates sharing a `canvasId`.
+- **Never build a timestamp with `new Date("YYYY-MM-DDTHH:MM")` on the server.** That
+  resolves against the runtime's zone, and Vercel runs in UTC — a 3pm Pacific deadline
+  was stored as 8am Pacific, so Gmail-created reminders fired seven hours early. Use
+  `zonedToEpochMs()` from `lib/localtime.js`. The client may parse naively; it's already
+  in Shaurya's zone.
 - **A time with no date must default to today**, or `remindAt` never computes and the
   reminder silently never fires — with no visible date chip either.
 - **Always clear loading state in `finally`.** An early return left task ids in

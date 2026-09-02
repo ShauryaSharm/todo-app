@@ -1,5 +1,6 @@
 import admin from "firebase-admin";
 import { groqChat } from "../lib/groq.js";
+import { zonedToEpochMs } from "../lib/localtime.js";
 
 // Token exchange + per-message AI triage can run past Vercel's 10s default.
 export const maxDuration = 60;
@@ -189,8 +190,9 @@ export default async function handler(req, res) {
         const v = verdicts.get(j);
         if (v) {
           const id = db.collection("_").doc().id;
-          const remindAt = v.dueDate && v.dueTime
-            ? new Date(`${v.dueDate}T${v.dueTime}:00`).getTime() : null;
+          // Vercel runs in UTC, so parsing the due date with the Date constructor put
+          // every reminder seven or eight hours early. Resolve it in Shaurya's zone.
+          const remindAt = v.dueDate && v.dueTime ? zonedToEpochMs(v.dueDate, v.dueTime) : null;
           await tasksRef.doc(id).set({
             id,
             text: v.title,
@@ -202,6 +204,7 @@ export default async function handler(req, res) {
             description: `${v.description}\nhttps://mail.google.com/mail/u/0/#inbox/${email.id}`.trim(),
             remindAt,
             notified: false,
+            notifiedStages: [],
             repeat: null,
             gmailId: email.id,
             createdAt: Date.now(),
