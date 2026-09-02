@@ -3,6 +3,9 @@ import { AI_ENDPOINT, PLAN_ENDPOINT } from "./ai-config.js";
 import { VAPID_PUBLIC_KEY } from "./notify-config.js";
 
 const STORAGE_KEY = "todo-tasks-v1";
+// When this device last saw the cloud's version of the list. Used to tell work done
+// offline (worth uploading) from a stale copy of something deleted elsewhere.
+const SYNC_KEY = "todo-last-cloud-sync";
 
 const CATEGORY_COLORS = {
   Work: "var(--cat-work)",
@@ -62,6 +65,10 @@ function loadLocal() {
   catch { return []; }
 }
 function saveLocal() { localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks)); }
+function lastCloudSync() {
+  const n = Number(localStorage.getItem(SYNC_KEY));
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
 function uid() { return crypto.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random()); }
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, (c) =>
@@ -610,11 +617,13 @@ function spawnNextOccurrence(task) {
     dueDate: next,
     done: false,
     completedAt: null,
+    completedBy: null,            // the new occurrence hasn't been finished by anyone
     createdAt: Date.now(),
     updatedAt: Date.now(),
   };
   delete clone.canvasId;          // a repeat is ours, not Canvas's
   delete clone.canvasCourse;
+  delete clone.gmailId;           // ...and likewise not the email's
   applyRemind(clone);
   tasks.push(clone);
   saveLocal();
@@ -1005,7 +1014,18 @@ async function initCloudSync(config) {
     setStatus("Syncing…");
 
     const tasksRef = collection(db, "users", user.uid, "tasks");
-    for (const task of tasks) await setDoc(doc(tasksRef, task.id), task, { merge: true });
+    // Upload only what changed since this device last saw the cloud. Pushing the whole
+    // local list resurrected anything deleted on another device while this one was
+    // closed: the copy sitting here is stale, not new, and re-uploading it put the task
+    // back on every device. With no marker recorded (a first sign-in) everything goes up,
+    // which is the case where the local list genuinely is the newer one.
+    const since = lastCloudSync();
+    const pending = since
+      ? tasks.filter((t) => (t.updatedAt || t.createdAt || 0) > since)
+      : tasks;
+    await Promise.all(
+      pending.map((t) => setDoc(doc(tasksRef, t.id), t, { merge: true }).catch(() => {}))
+    );
 
     cloud = {
       push: (task) => setDoc(doc(tasksRef, task.id), task, { merge: true }).catch(() => {}),
@@ -1019,6 +1039,9 @@ async function initCloudSync(config) {
 
     unsub = onSnapshot(tasksRef, (snap) => {
       tasks = snap.docs.map((d) => d.data());
+      // This list now matches the cloud, so anything edited after this moment is a
+      // genuine offline change rather than a stale leftover.
+      localStorage.setItem(SYNC_KEY, String(Date.now()));
       saveLocal(); render(); setStatus("Synced", "ok");
     }, (err) => { console.error(err); setStatus("Sync error — using local copy.", "err"); });
   });
