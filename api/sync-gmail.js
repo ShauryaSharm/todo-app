@@ -37,8 +37,25 @@ async function getAccessToken() {
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body,
   });
-  if (!res.ok) throw new Error(`google token ${res.status}: ${(await res.text()).slice(0, 200)}`);
-  return (await res.json()).access_token;
+  const text = await res.text();
+  if (!res.ok) {
+    // While the OAuth app sits in "Testing", Google expires the refresh token after 7
+    // days and every later refresh comes back invalid_grant. That reads like a generic
+    // auth failure, so say plainly what it is and how to fix it — otherwise the sync
+    // just stops producing tasks and nothing explains why.
+    if (text.includes("invalid_grant")) {
+      throw new Error(
+        "GOOGLE_REFRESH_TOKEN is dead (invalid_grant). If the OAuth app is still in " +
+        "Testing status, Google expires the token after 7 days: mint a new one in the " +
+        "OAuth playground and update the Vercel env var. Publishing the app to " +
+        "production stops the expiry for good."
+      );
+    }
+    throw new Error(`google token ${res.status}: ${text.slice(0, 200)}`);
+  }
+  const tok = JSON.parse(text).access_token;
+  if (!tok) throw new Error("google returned no access_token");
+  return tok;
 }
 
 async function gmail(path, token) {

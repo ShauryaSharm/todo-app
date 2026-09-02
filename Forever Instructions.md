@@ -184,4 +184,13 @@ live sync is the Vercel function, not these scripts.
   His actual Gmail labels (confirmed 2026-09-01, no dedicated "To Do" label exists):
   School, Scouts, Family, Volunteering, Jobs, Newsletters, Accounts, Promos. The
   actionable ones are School / Scouts / Volunteering — hence multi-label support.
+  Google Cloud project `todo-gmail-507402`, OAuth client `todo-gmail-client`, redirect
+  URI `https://developers.google.com/oauthplayground`, scope `gmail.readonly`.
+  **The app is stuck in Testing status.** Its Audience page insists "OAuth configuration
+  is incomplete — visit the Branding page" while Branding is demonstrably complete (Save
+  greyed out, all required fields stored), and Data Access refuses to persist a scope.
+  Publish app stays disabled. Not worth more time: Testing works, it just needs Shaurya
+  listed as a test user, and the refresh token then expires every 7 days. `sync-gmail.js`
+  detects that (`invalid_grant`) and returns an error saying to mint a new token rather
+  than failing silently. Retry publishing later — it may just be a console bug.
 - Deliberately not built (judged as clutter for now): search, subtasks, course grouping.
