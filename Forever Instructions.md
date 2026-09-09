@@ -78,7 +78,8 @@ All cron endpoints are guarded by `CRON_SECRET`, accepted as header `x-cron-secr
 `CANVAS_TARGET_UID`, `CANVAS_EXCLUDE_COURSES` (optional), `DUE_ANCHOR_HOUR` (optional,
 default 17), `QUIET_START`/`QUIET_END` (optional, default 22/7; `QUIET_END=-1` disables
 quiet hours), `SWEEP_EVERY_MIN` (optional, default 5; 1 disables the gate),
-`CALENDAR_NAME` (optional, default "To Do"), `CALENDAR_PULL_DAYS` (optional, default
+`CALENDAR_NAME` (optional, default "To Do"), `CALENDAR_SKIP` (optional, default
+"canvas,holiday,birthday"), `CALENDAR_PULL_DAYS` (optional, default
 30), `ACTION_SECRET` (optional, falls back to `CRON_SECRET`), `PUBLIC_API_BASE`
 (optional), `GOOGLE_CLIENT_ID`,
 `GOOGLE_CLIENT_SECRET`, `GOOGLE_REFRESH_TOKEN`, `GMAIL_LABEL`, `DIGEST_HOUR` (optional,
@@ -187,6 +188,11 @@ Groq's live model list via `curl https://api.groq.com/openai/v1/models -H "Autho
   kills the Gmail sync. The full set is `gmail.readonly`, `calendar.readonly` and
   `calendar.app.created` — the last of which grants access *only* to calendars this app
   itself created, so it can never modify or delete anything on the real calendars.
+- **Shaurya subscribes to Canvas's ICS feed** as a Google calendar, "Shaurya Sharma
+  Calendar (Canvas)". It mirrors assignments that `sync-canvas` already imports as tasks,
+  so reading it would put a second copy of every assignment in the list. `CALENDAR_SKIP`
+  excludes it by name, along with holiday and birthday calendars. Confirmed live from his
+  account 2026-09-09; his other calendars are the primary one and "Family".
 - **The calendar sync must never read its own calendar.** Its own pushed events would be
   triaged straight back into tasks, which would be pushed back as events. `sync-calendar.js`
   skips `calId` when listing.

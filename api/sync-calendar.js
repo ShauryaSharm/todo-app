@@ -19,6 +19,23 @@ const PUSH_AHEAD_DAYS = 60;
 const PULL_AHEAD_DAYS = Number(process.env.CALENDAR_PULL_DAYS ?? 30);
 const MAX_EVENTS = 40;
 
+// Calendars never read for tasks. The Canvas one matters most: Shaurya subscribes to
+// Canvas's ICS feed, so those assignments are already on his Google Calendar *and*
+// already imported as tasks by sync-canvas. Triaging the mirror would give him a second
+// copy of every assignment. Holiday and birthday calendars are noise for the same
+// reason — nothing on them is work.
+const SKIP_TERMS = (process.env.CALENDAR_SKIP ?? "canvas,holiday,birthday")
+  .split(",").map((t) => t.trim().toLowerCase()).filter(Boolean);
+
+function skipCalendar(cal, ownId) {
+  if (cal.id === ownId) return "own";                 // feedback loop
+  // Google's generated calendars all carry a #kind@ marker in the id.
+  if (/#(holiday|contacts|weeknum)@/i.test(cal.id)) return "generated";
+  const hay = `${cal.id} ${cal.summary || ""}`.toLowerCase();
+  const hit = SKIP_TERMS.find((t) => hay.includes(t));
+  return hit ? `matched "${hit}"` : null;
+}
+
 const CATEGORIES = ["Homework", "Work", "Personal", "Shopping", "Health", "Urgent", "Other"];
 
 // Google event ids must be base32hex (0-9, a-v). A sha1 hex digest is a subset of that,
@@ -212,8 +229,10 @@ export default async function handler(req, res) {
     const timeMax = new Date(zonedToEpochMs(addDays(today, PULL_AHEAD_DAYS), "23:59")).toISOString();
 
     const candidates = [];
+    const skipped = [];
     for (const c of cals) {
-      if (c.id === calId) continue; // never read our own calendar — that's a feedback loop
+      const why = skipCalendar(c, calId);
+      if (why) { skipped.push(`${c.summary || c.id} (${why})`); continue; }
       const q = new URLSearchParams({
         timeMin, timeMax, singleEvents: "true", orderBy: "startTime", maxResults: "50",
       });
@@ -256,7 +275,7 @@ export default async function handler(req, res) {
     if (!fresh.length) {
       return res.status(200).json({
         ok: true, calendar: CAL_NAME, calendarCreated: created,
-        pushed, unpushed, matched: candidates.length, examined: 0, added: 0,
+        pushed, unpushed, skipped, matched: candidates.length, examined: 0, added: 0,
       });
     }
 
@@ -271,7 +290,7 @@ export default async function handler(req, res) {
         }));
       }
       return res.status(200).json({
-        ok: true, dry: true, pushed, examined: out.length,
+        ok: true, dry: true, pushed, skipped, examined: out.length,
         wouldAdd: out.filter((o) => o.verdict).length, results: out,
       });
     }
@@ -314,7 +333,7 @@ export default async function handler(req, res) {
 
     return res.status(200).json({
       ok: true, calendar: CAL_NAME, calendarCreated: created,
-      pushed, unpushed, matched: candidates.length, examined: fresh.length, added,
+      pushed, unpushed, skipped, matched: candidates.length, examined: fresh.length, added,
     });
   } catch (err) {
     return res.status(500).json({ error: "calendar_sync_failed", detail: String(err).slice(0, 400) });
