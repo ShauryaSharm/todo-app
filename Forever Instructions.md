@@ -196,6 +196,14 @@ Groq's live model list via `curl https://api.groq.com/openai/v1/models -H "Autho
 - **The calendar sync must never read its own calendar.** Its own pushed events would be
   triaged straight back into tasks, which would be pushed back as events. `sync-calendar.js`
   skips `calId` when listing.
+- **Always bound BOTH ends of a Firestore range query.** `where("remindAt", "<=", now)`
+  with no lower bound returned every task whose reminder time had ever passed, and the
+  loop discarded the old ones only after reading them all. The set grew forever and grew
+  again through each day, so `send-reminders` got steadily slower until evening runs timed
+  out with a 500 while morning runs still passed — 14 failures in 40 runs by 2026-10-11,
+  every one of them between 16:09 and 23:37 PT. Diagnosed from the Actions log
+  (`gh run view <id> --log-failed`), which showed 80 seconds elapsed then
+  `curl: (22) ... error: 500`. Realistic data: 301 documents read per run became 2.
 - **Watch Firestore's 50k free daily reads when adding anything to `send-reminders`.**
   It runs every minute, so a query returning 50 docs costs 72,000 reads/day on its own —
   over quota, after which reads fail and reminders stop dead. The advance-warning and

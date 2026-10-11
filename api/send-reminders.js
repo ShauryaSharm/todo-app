@@ -124,7 +124,16 @@ export default async function handler(req, res) {
     const userRefs = await db.collection("users").listDocuments();
     for (const userRef of userRefs) {
       const uid = userRef.id;
-      const snap = await userRef.collection("tasks").where("remindAt", "<=", now).get();
+      // Bound both ends. "<= now" alone returned every task whose reminder time had ever
+      // passed — months of them — and the loop below then discarded everything older than
+      // WINDOW_MS, after paying to read it all. That set grows forever, and grows again
+      // through each day as more tasks pass their due time, so the function slowly got
+      // slower until evening runs hit the timeout and returned 500 while morning runs
+      // still squeaked through. The lower bound is the one the loop already applied.
+      const snap = await userRef.collection("tasks")
+        .where("remindAt", ">=", now - WINDOW_MS)
+        .where("remindAt", "<=", now)
+        .get();
 
       let subsSnap = null;
       for (const doc of snap.docs) {
